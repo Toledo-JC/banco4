@@ -1,0 +1,137 @@
+{
+  "entities": {
+    "Colaborador": {
+      "title": "Colaborador",
+      "description": "Cadastro oficial de colaboradores da empresa nas sedes KO, BE e MN",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "matricula": { "type": "string", "maxLength": 64 },
+        "nome": { "type": "string", "maxLength": 200 },
+        "funcao": { "type": "string", "maxLength": 150 },
+        "cargo": { "type": "string", "maxLength": 150 },
+        "sede": { "type": "string", "enum": ["KO", "BE", "MN"] },
+        "sede_origem": { "type": "string", "enum": ["KO", "BE", "MN"] },
+        "sede_atual": { "type": "string", "enum": ["KO", "BE", "MN"] },
+        "dataAdmissao": { "type": "string", "maxLength": 20 },
+        "status": { "type": "string", "enum": ["Ativo", "Inativo", "Férias", "Afastado"] },
+        "saldoInicialHoras": { "type": "number" },
+        "cpf": { "type": "string", "maxLength": 30 },
+        "pis": { "type": "string", "maxLength": 30 },
+        "rg": { "type": "string", "maxLength": 30 },
+        "dataNascimento": { "type": "string", "maxLength": 20 },
+        "telefone": { "type": "string", "maxLength": 50 },
+        "email": { "type": "string", "maxLength": 150 },
+        "horarioTrabalho": { "type": "string", "maxLength": 100 },
+        "url_foto_perfil": { "type": "string", "maxLength": 1000 },
+        "id_drive_foto": { "type": "string", "maxLength": 200 },
+        "data_inicio_status": { "type": "string", "maxLength": 20 },
+        "data_fim_status": { "type": "string", "maxLength": 20 },
+        "observacao_status": { "type": "string", "maxLength": 500 },
+        "criadoEm": { "type": "string", "maxLength": 50 },
+        "atualizadoEm": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "matricula", "nome", "sede", "status"]
+    },
+    "Lancamento": {
+      "title": "Lancamento",
+      "description": "Registro diário de ocorrência do banco de horas CLT com liquidação FIFO",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "matricula": { "type": "string", "maxLength": 64 },
+        "employeeName": { "type": "string", "maxLength": 200 },
+        "employeeSede": { "type": "string", "enum": ["KO", "BE", "MN"] },
+        "employeeFuncao": { "type": "string", "maxLength": 150 },
+        "employeeAvatarUrl": { "type": "string", "maxLength": 1000 },
+        "dataRegistro": { "type": "string", "maxLength": 20 },
+        "data_ocorrencia": { "type": "string", "maxLength": 20 },
+        "tipoOcorrencia": { "type": "string", "enum": ["TRABALHO", "FALTA_INJUSTIFICADA", "ATESTADO_MEDICO", "COMPENSACAO", "FERIAS", "LICENCA"] },
+        "horasBrutas": { "type": "number" },
+        "multiplicador": { "type": "number" },
+        "saldoCalculado": { "type": "number" },
+        "saldo_remanescente": { "type": "number" },
+        "status_compensacao": { "type": "string", "enum": ["ABERTO", "PARCIALMENTE_COMPENSADO", "TOTALMENTE_COMPENSADO"] },
+        "eFeriado": { "type": "boolean" },
+        "nomeFeriado": { "type": "string", "maxLength": 100 },
+        "diaSemana": { "type": "number" },
+        "diaSemanaNome": { "type": "string", "maxLength": 30 },
+        "observacao": { "type": "string", "maxLength": 1000 },
+        "criadoEm": { "type": "string", "maxLength": 50 },
+        "criadoPorEmail": { "type": "string", "maxLength": 150 }
+      },
+      "required": ["id", "matricula", "dataRegistro", "tipoOcorrencia", "saldoCalculado"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Usuários de gestão e RH autorizados com controle de acesso RBAC",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 150 },
+        "nome": { "type": "string", "maxLength": 150 },
+        "role": { "type": "string", "enum": ["SUPER_ADMIN", "GESTOR_RH", "AUDITOR"] },
+        "sede": { "type": "string", "enum": ["KO", "BE", "MN", "TODAS"] },
+        "ativo": { "type": "boolean" },
+        "criadoEm": { "type": "string", "maxLength": 50 },
+        "atualizadoEm": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["email", "role", "ativo"]
+    },
+    "ColaboradorAuth": {
+      "title": "ColaboradorAuth",
+      "description": "Credenciais e senhas criptografadas dos colaboradores para acesso individual seguro LGPD",
+      "type": "object",
+      "properties": {
+        "matricula": { "type": "string", "maxLength": 64 },
+        "passwordHash": { "type": "string", "maxLength": 256 },
+        "senhaDefinida": { "type": "boolean" },
+        "email": { "type": "string", "maxLength": 150 },
+        "tokenRecuperacao": { "type": "string", "maxLength": 32 },
+        "tokenExpiracao": { "type": "string", "maxLength": 50 },
+        "ultimoAcesso": { "type": "string", "maxLength": 50 },
+        "criadoEm": { "type": "string", "maxLength": 50 },
+        "atualizadoEm": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["matricula", "senhaDefinida"]
+    },
+    "LogAcesso": {
+      "title": "LogAcesso",
+      "description": "Trilha de auditoria e logs de consultas em conformidade com a LGPD",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string", "maxLength": 50 },
+        "matricula": { "type": "string", "maxLength": 64 },
+        "nome": { "type": "string", "maxLength": 200 },
+        "tipoAcao": { "type": "string", "enum": ["LOGIN_COLABORADOR", "CONSULTA_SALDO", "PRIMEIRO_ACESSO", "DEFINICAO_SENHA", "LOGIN_GESTAO_RH", "RESET_SENHA_RH", "TENTATIVA_INVALIDA"] },
+        "sucesso": { "type": "boolean" },
+        "detalhes": { "type": "string", "maxLength": 500 },
+        "ipOrigem": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "timestamp", "matricula", "tipoAcao", "sucesso"]
+    }
+  },
+  "firestore": {
+    "/colaboradores/{colaboradorId}": {
+      "schema": "Colaborador",
+      "description": "Coleção de colaboradores da base centralizada"
+    },
+    "/lancamentos/{lancamentoId}": {
+      "schema": "Lancamento",
+      "description": "Coleção central de lançamentos diários e compensações FIFO"
+    },
+    "/admin_users/{adminUserId}": {
+      "schema": "AdminUser",
+      "description": "Perfis de permissões e controle de acesso RBAC"
+    },
+    "/colaboradores_auth/{matriculaId}": {
+      "schema": "ColaboradorAuth",
+      "description": "Credenciais e tokens de validação para acesso de colaboradores"
+    },
+    "/logs_acesso/{logId}": {
+      "schema": "LogAcesso",
+      "description": "Registro de auditoria e trilha de acessos LGPD"
+    }
+  }
+}

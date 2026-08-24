@@ -1,0 +1,1131 @@
+import React, { useState, useMemo } from 'react';
+import { Employee, Branch, InsalubrityRecord, GrauInsalubridade, SystemConfig, ConstructionSite } from '../types';
+import { InsalubritySimpleMatrixView } from './InsalubritySimpleMatrixView';
+import { 
+  AlertTriangle, 
+  ShieldAlert, 
+  Plus, 
+  Search, 
+  Filter, 
+  Trash2, 
+  FileText, 
+  CheckCircle2, 
+  AlertCircle, 
+  Clock, 
+  Calendar, 
+  Building2, 
+  User, 
+  HardHat, 
+  Activity, 
+  Sparkles, 
+  Info,
+  X,
+  FileSpreadsheet,
+  Download,
+  Flame,
+  Droplets,
+  Layers,
+  HelpCircle,
+  TrendingUp,
+  Settings2,
+  Table
+} from 'lucide-react';
+
+interface InsalubrityManagementProps {
+  employees: Employee[];
+  insalubrityRecords: InsalubrityRecord[];
+  onSaveRecord: (record: InsalubrityRecord) => Promise<void>;
+  onSaveBatchRecords?: (records: InsalubrityRecord[]) => Promise<void>;
+  onDeleteRecord: (id: string) => Promise<void>;
+  onUpdateEmployeeGrauFixa?: (empId: string, grau: GrauInsalubridade) => Promise<void>;
+  onNavigateToReports?: () => void;
+  systemConfig?: SystemConfig;
+  onUpdateSystemConfig?: (cfg: SystemConfig) => Promise<void>;
+  constructionSites?: ConstructionSite[];
+  currentUserEmail?: string;
+  theme?: 'dark' | 'light';
+}
+
+const ATIVIDADES_TIPICAS_COMARA = [
+  { nome: 'Aplicação e espalhamento de emulsão asfáltica / massa a quente', grau: '40%' as const, desc: 'Contato com hidrocarbonetos aromáticos e alcatrão (Anexo 13)' },
+  { nome: 'Operação de britador e moagem de agregados (Poeira mineral)', grau: '20%' as const, desc: 'Poeiras minerais e particulados respiráveis (Anexo 12)' },
+  { nome: 'Manutenção de maquinário pesado (Óleos e graxas minerais)', grau: '20%' as const, desc: 'Manipulação de lubrificantes e desengraxantes (Anexo 13)' },
+  { nome: 'Pintura de sinalização de pista a pistola com solventes', grau: '20%' as const, desc: 'Vapores orgânicos e névoas de solvente (Anexo 11/13)' },
+  { nome: 'Trabalho contínuo em câmara frigorífica de víveres', grau: '20%' as const, desc: 'Exposição ao frio artificial sem proteção integral (Anexo 9)' },
+  { nome: 'Limpeza de caixas de decantação, esgoto e fossas sépticas', grau: '40%' as const, desc: 'Agentes biológicos e galerias sanitárias (Anexo 14)' },
+  { nome: 'Operação de compactadores de solo e britadores (Vibração e Ruído)', grau: '20%' as const, desc: 'Exposição a ruído de impacto e vibrações contínuas (Anexo 1/8)' },
+  { nome: 'Manipulação de cimento em betoneiras e silos em pó', grau: '20%' as const, desc: 'Poeiras alcalinas de cimento e cal (Anexo 13)' },
+];
+
+export const InsalubrityManagement: React.FC<InsalubrityManagementProps> = ({
+  employees,
+  insalubrityRecords,
+  onSaveRecord,
+  onSaveBatchRecords,
+  onDeleteRecord,
+  onUpdateEmployeeGrauFixa,
+  onNavigateToReports,
+  systemConfig,
+  onUpdateSystemConfig,
+  constructionSites = [],
+  currentUserEmail = 'coari.comara@gmail.com',
+  theme = 'dark',
+}) => {
+  const isDark = theme === 'dark';
+
+  // Modo de visualização: 'SIMPLES' (Matriz Planilha) vs 'COMPLETA' (Apontamentos e Fichas)
+  const [currentMode, setCurrentMode] = useState<'SIMPLES' | 'COMPLETA'>(
+    systemConfig?.insalubrityMode || 'SIMPLES'
+  );
+
+  // Sub-view no Modo Completo: 'ATIVIDADES' | 'FIXA' | 'GUIA_NR15'
+  const [activeSubTab, setActiveSubTab] = useState<'ATIVIDADES' | 'FIXA' | 'GUIA_NR15'>('ATIVIDADES');
+
+  const handleToggleMode = async (newMode: 'SIMPLES' | 'COMPLETA') => {
+    setCurrentMode(newMode);
+    if (onUpdateSystemConfig && systemConfig) {
+      try {
+        await onUpdateSystemConfig({
+          ...systemConfig,
+          insalubrityMode: newMode,
+        });
+      } catch (err) {
+        console.error('Erro ao atualizar modo nas configurações:', err);
+      }
+    }
+  };
+
+  // Filters for Atividades table
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedBranch, setSelectedBranch] = useState<string>('TODAS');
+  const [selectedGrau, setSelectedGrau] = useState<string>('TODOS');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+
+  // Modal: Novo Lançamento de Atividade
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [formMatricula, setFormMatricula] = useState('');
+  const [formDataEvento, setFormDataEvento] = useState(new Date().toISOString().split('T')[0]);
+  const [formAtividade, setFormAtividade] = useState('');
+  const [formGrau, setFormGrau] = useState<'10%' | '20%' | '40%'>('20%');
+  const [formQuantidade, setFormQuantidade] = useState<number>(8);
+  const [formUnidade, setFormUnidade] = useState<'HORAS' | 'DIAS'>('HORAS');
+  const [formResponsavel, setFormResponsavel] = useState('Encarregado de Campo');
+  const [formObservacoes, setFormObservacoes] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formFeedback, setFormFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Selected Employee Helper for Form
+  const selectedEmployeeInForm = useMemo(() => {
+    if (!formMatricula) return null;
+    const clean = formMatricula.trim().toUpperCase();
+    return employees.find(
+      (e) => e.matricula.trim().toUpperCase() === clean ||
+             e.matricula.replace(/^0+/, '').toUpperCase() === clean.replace(/^0+/, '')
+    ) || null;
+  }, [formMatricula, employees]);
+
+  // Statistics
+  const stats = useMemo(() => {
+    const fixedCount = {
+      isento: employees.filter(e => !e.grauInsalubridadeFixa || e.grauInsalubridadeFixa === 'ISENTO').length,
+      g10: employees.filter(e => e.grauInsalubridadeFixa === '10%').length,
+      g20: employees.filter(e => e.grauInsalubridadeFixa === '20%').length,
+      g40: employees.filter(e => e.grauInsalubridadeFixa === '40%').length,
+      totalComAdicional: employees.filter(e => e.grauInsalubridadeFixa && e.grauInsalubridadeFixa !== 'ISENTO').length,
+    };
+
+    const totalAtividadesLancadas = insalubrityRecords.length;
+    const totalHorasAtividade = insalubrityRecords
+      .filter(r => r.unidade === 'HORAS')
+      .reduce((acc, curr) => acc + (Number(curr.quantidadeHorasDias) || 0), 0);
+    const totalDiasAtividade = insalubrityRecords
+      .filter(r => r.unidade === 'DIAS')
+      .reduce((acc, curr) => acc + (Number(curr.quantidadeHorasDias) || 0), 0);
+
+    return {
+      fixedCount,
+      totalAtividadesLancadas,
+      totalHorasAtividade,
+      totalDiasAtividade,
+    };
+  }, [employees, insalubrityRecords]);
+
+  // Filtered Records for Atividades
+  const filteredRecords = useMemo(() => {
+    return insalubrityRecords.filter((rec) => {
+      // Search
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchName = rec.nomeColaborador.toLowerCase().includes(q);
+        const matchMat = rec.matricula.toLowerCase().includes(q);
+        const matchAtiv = rec.atividadeDesempenhada.toLowerCase().includes(q);
+        const matchResp = rec.responsavelLancamento.toLowerCase().includes(q);
+        if (!matchName && !matchMat && !matchAtiv && !matchResp) return false;
+      }
+
+      // Branch
+      if (selectedBranch !== 'TODAS' && rec.sede !== selectedBranch) {
+        return false;
+      }
+
+      // Grau
+      if (selectedGrau !== 'TODOS' && rec.grauExposicao !== selectedGrau) {
+        return false;
+      }
+
+      // Dates
+      if (startDate && rec.dataEvento < startDate) return false;
+      if (endDate && rec.dataEvento > endDate) return false;
+
+      return true;
+    });
+  }, [insalubrityRecords, searchQuery, selectedBranch, selectedGrau, startDate, endDate]);
+
+  // Handle Form Submit
+  const handleSubmitRecord = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setFormFeedback(null);
+
+    if (!selectedEmployeeInForm) {
+      setFormFeedback({ type: 'error', text: 'Selecione um colaborador válido para registrar o evento.' });
+      return;
+    }
+
+    if (!formAtividade.trim()) {
+      setFormFeedback({ type: 'error', text: 'Informe a atividade insalubre desempenhada.' });
+      return;
+    }
+
+    if (formQuantidade <= 0) {
+      setFormFeedback({ type: 'error', text: 'A quantidade de horas/dias deve ser maior que zero.' });
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const newRec: InsalubrityRecord = {
+        id: `ins-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        matricula: selectedEmployeeInForm.matricula,
+        nomeColaborador: selectedEmployeeInForm.nome,
+        sede: selectedEmployeeInForm.sede_atual || selectedEmployeeInForm.sede || 'KO',
+        funcao: selectedEmployeeInForm.funcao || selectedEmployeeInForm.cargo || 'Operacional',
+        dataEvento: formDataEvento,
+        atividadeDesempenhada: formAtividade.trim(),
+        grauExposicao: formGrau,
+        quantidadeHorasDias: Number(formQuantidade),
+        unidade: formUnidade,
+        responsavelLancamento: formResponsavel.trim() || 'Encarregado de Campo',
+        observacoes: formObservacoes.trim(),
+        criadoEm: new Date().toISOString(),
+        criadoPorEmail: currentUserEmail,
+      };
+
+      await onSaveRecord(newRec);
+      setFormFeedback({ type: 'success', text: 'Atividade insalubre lançada com sucesso no Firestore!' });
+      setTimeout(() => {
+        setIsModalOpen(false);
+        setFormAtividade('');
+        setFormObservacoes('');
+        setFormFeedback(null);
+      }, 1000);
+    } catch (err: any) {
+      console.error(err);
+      setFormFeedback({ type: 'error', text: err?.message || 'Falha ao salvar lançamento de insalubridade.' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDelete = async (id: string, name: string) => {
+    if (window.confirm(`Deseja realmente remover o registro de atividade insalubre de "${name}"?`)) {
+      try {
+        await onDeleteRecord(id);
+      } catch (err: any) {
+        alert(`Erro ao excluir: ${err?.message || 'Falha na exclusão'}`);
+      }
+    }
+  };
+
+  // Quick select activity preset
+  const handleSelectPreset = (preset: typeof ATIVIDADES_TIPICAS_COMARA[0]) => {
+    setFormAtividade(preset.nome);
+    setFormGrau(preset.grau);
+  };
+
+  // Helper for badge colors
+  const getGrauBadge = (grau: string) => {
+    switch (grau) {
+      case '40%':
+        return isDark 
+          ? 'bg-red-500/15 text-red-400 border border-red-500/30' 
+          : 'bg-red-50 text-red-700 border border-red-200';
+      case '20%':
+        return isDark 
+          ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' 
+          : 'bg-amber-50 text-amber-700 border border-amber-200';
+      case '10%':
+        return isDark 
+          ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30' 
+          : 'bg-blue-50 text-blue-700 border border-blue-200';
+      default:
+        return isDark 
+          ? 'bg-gray-800 text-gray-400 border border-gray-700' 
+          : 'bg-slate-100 text-slate-600 border border-slate-200';
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* ------------------------------------------------------------- */}
+      {/* SELETOR PRINCIPAL DE MODO: SIMPLES (PLANILHA) vs COMPLETO     */}
+      {/* ------------------------------------------------------------- */}
+      <div className={`p-2.5 rounded-2xl border flex items-center justify-between gap-3 flex-wrap ${
+        isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200'
+      }`}>
+        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-black/10 dark:bg-black/40 border border-black/5 dark:border-white/5">
+          <button
+            onClick={() => handleToggleMode('SIMPLES')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              currentMode === 'SIMPLES'
+                ? 'bg-amber-600 text-white shadow-sm'
+                : isDark ? 'text-gray-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Table className="w-3.5 h-3.5" />
+            <span>Modo Simples (Matriz Planilha Mensal)</span>
+          </button>
+
+          <button
+            onClick={() => handleToggleMode('COMPLETA')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              currentMode === 'COMPLETA'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : isDark ? 'text-gray-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>Modo Completo (Apontamentos & Ficha Fixa)</span>
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 text-xs">
+          <span className={`text-[11px] font-mono ${isDark ? 'text-gray-400' : 'text-slate-500'}`}>
+            Modo Atual: <strong>{currentMode === 'SIMPLES' ? 'Planilha de Efetivo Mensal' : 'Auditoria NR-15'}</strong>
+          </span>
+        </div>
+      </div>
+
+      {/* RENDERIZAÇÃO CONDICIONAL POR MODO */}
+      {currentMode === 'SIMPLES' ? (
+        <InsalubritySimpleMatrixView
+          employees={employees}
+          insalubrityRecords={insalubrityRecords}
+          onSaveRecord={onSaveRecord}
+          onSaveBatchRecords={onSaveBatchRecords}
+          onDeleteRecord={onDeleteRecord}
+          constructionSites={constructionSites}
+          currentUserEmail={currentUserEmail}
+          theme={theme}
+          onSwitchToCompleteMode={() => handleToggleMode('COMPLETA')}
+        />
+      ) : (
+        <>
+          {/* ------------------------------------------------------------- */}
+          {/* 1. CABEÇALHO DO MÓDULO */}
+          {/* ------------------------------------------------------------- */}
+          <div className={`p-6 rounded-2xl border flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-sm ${
+            isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200'
+          }`}>
+            <div className="flex items-start sm:items-center gap-3.5">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-amber-500 to-red-600 text-white flex items-center justify-center shadow-lg shadow-amber-500/20 shrink-0">
+                <HardHat className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h1 className={`text-lg sm:text-xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                    Gestão de Insalubridade
+                  </h1>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase ${
+                    isDark ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' : 'bg-amber-50 text-amber-700 border border-amber-200'
+                  }`}>
+                    NR-15 • COMARA
+                  </span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                    isDark ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-blue-50 text-blue-700 border border-blue-200'
+                  }`}>
+                    Fixa vs Por Atividade
+                  </span>
+                </div>
+                <p className={`text-xs mt-0.5 ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+                  Controle de adicionais fixos contratuais e apontamentos de atividades insalubres em canteiros de obras
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 flex-wrap">
+              {onNavigateToReports && (
+                <button
+                  onClick={onNavigateToReports}
+                  className={`px-3.5 py-2 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+                    isDark ? 'border-[#2A2E38] hover:bg-[#1F2229] text-gray-300' : 'border-slate-300 hover:bg-slate-100 text-slate-700'
+                  }`}
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                  <span>Relatórios Executivos</span>
+                </button>
+              )}
+
+              <button
+                onClick={() => setIsModalOpen(true)}
+                className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-2 transition-all shadow-md shadow-amber-600/20 active:scale-98 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Lançar Atividade Insalubre</span>
+              </button>
+            </div>
+          </div>
+
+      {/* ------------------------------------------------------------- */}
+      {/* 2. CARDS DE INDICADORES / METRICAS */}
+      {/* ------------------------------------------------------------- */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Card 1: Total com Adicional Fixo */}
+        <div className={`p-5 rounded-2xl border ${
+          isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200 shadow-xs'
+        }`}>
+          <div className="flex items-center justify-between text-xs mb-2">
+            <span className={`font-bold ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>INSALUBRIDADE FIXA</span>
+            <ShieldAlert className="w-4 h-4 text-amber-400" />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className={`text-2xl font-black ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              {stats.fixedCount.totalComAdicional}
+            </span>
+            <span className={`text-xs ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+              colaboradores
+            </span>
+          </div>
+          <div className="mt-3 flex items-center gap-1.5 text-[11px] font-mono">
+            <span className="px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/30">40%: {stats.fixedCount.g40}</span>
+            <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">20%: {stats.fixedCount.g20}</span>
+            <span className="px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 border border-blue-500/30">10%: {stats.fixedCount.g10}</span>
+          </div>
+        </div>
+
+        {/* Card 2: Colaboradores Isentos */}
+        <div className={`p-5 rounded-2xl border ${
+          isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200 shadow-xs'
+        }`}>
+          <div className="flex items-center justify-between text-xs mb-2">
+            <span className={`font-bold ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>ISENTOS DE ADICIONAL FIXO</span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className={`text-2xl font-black ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+              {stats.fixedCount.isento}
+            </span>
+            <span className={`text-xs ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+              de {employees.length} efetivo total
+            </span>
+          </div>
+          <p className={`text-[11px] mt-3 ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+            Apenas recebem quando houver lançamento por atividade
+          </p>
+        </div>
+
+        {/* Card 3: Eventos Pontuais Lançados */}
+        <div className={`p-5 rounded-2xl border ${
+          isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200 shadow-xs'
+        }`}>
+          <div className="flex items-center justify-between text-xs mb-2">
+            <span className={`font-bold ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>EVENTOS DE ATIVIDADE</span>
+            <Activity className="w-4 h-4 text-blue-400" />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className={`text-2xl font-black ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
+              {stats.totalAtividadesLancadas}
+            </span>
+            <span className={`text-xs ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+              apontamentos
+            </span>
+          </div>
+          <p className={`text-[11px] mt-3 ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+            Registros pontuais de serviços com agentes nocivos
+          </p>
+        </div>
+
+        {/* Card 4: Volume Exposto em Horas/Dias */}
+        <div className={`p-5 rounded-2xl border ${
+          isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200 shadow-xs'
+        }`}>
+          <div className="flex items-center justify-between text-xs mb-2">
+            <span className={`font-bold ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>TEMPO EXPOSTO APONTADO</span>
+            <Clock className="w-4 h-4 text-purple-400" />
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className={`text-2xl font-black ${isDark ? 'text-purple-400' : 'text-purple-600'}`}>
+              {stats.totalHorasAtividade}h
+            </span>
+            <span className={`text-xs ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+              + {stats.totalDiasAtividade} dias
+            </span>
+          </div>
+          <p className={`text-[11px] mt-3 ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+            Cálculo proporcional para folha de pagamento
+          </p>
+        </div>
+      </div>
+
+      {/* ------------------------------------------------------------- */}
+      {/* 3. NAVEGAÇÃO DE SUB-ABAS */}
+      {/* ------------------------------------------------------------- */}
+      <div className="flex items-center gap-2 border-b pb-3">
+        <button
+          onClick={() => setActiveSubTab('ATIVIDADES')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+            activeSubTab === 'ATIVIDADES'
+              ? isDark 
+                ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' 
+                : 'bg-amber-50 text-amber-700 border border-amber-200'
+              : isDark 
+                ? 'text-[#8E9299] hover:bg-[#15171C]' 
+                : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Activity className="w-4 h-4" />
+          <span>Apontamentos por Atividade ({insalubrityRecords.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('FIXA')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+            activeSubTab === 'FIXA'
+              ? isDark 
+                ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30' 
+                : 'bg-blue-50 text-blue-700 border border-blue-200'
+              : isDark 
+                ? 'text-[#8E9299] hover:bg-[#15171C]' 
+                : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <User className="w-4 h-4" />
+          <span>Insalubridade Fixa em Ficha ({stats.fixedCount.totalComAdicional})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('GUIA_NR15')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+            activeSubTab === 'GUIA_NR15'
+              ? isDark 
+                ? 'bg-purple-500/15 text-purple-400 border border-purple-500/30' 
+                : 'bg-purple-50 text-purple-700 border border-purple-200'
+              : isDark 
+                ? 'text-[#8E9299] hover:bg-[#15171C]' 
+                : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <HelpCircle className="w-4 h-4" />
+          <span>Guia Técnico NR-15 (COMARA)</span>
+        </button>
+      </div>
+
+      {/* ============================================================= */}
+      {/* SUB-VIEW 1: APONTAMENTOS POR ATIVIDADE                         */}
+      {/* ============================================================= */}
+      {activeSubTab === 'ATIVIDADES' && (
+        <div className="space-y-4">
+          {/* Filtros Bar */}
+          <div className={`p-4 rounded-2xl border flex flex-col md:flex-row gap-3 items-center justify-between ${
+            isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200'
+          }`}>
+            <div className="relative w-full md:w-80">
+              <Search className={`w-4 h-4 absolute left-3 top-3 ${isDark ? 'text-gray-500' : 'text-slate-400'}`} />
+              <input
+                type="text"
+                placeholder="Buscar por colaborador, matrícula ou atividade..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className={`w-full pl-9 pr-3 py-2 rounded-xl border text-xs outline-hidden transition-colors ${
+                  isDark ? 'bg-[#0D0F14] border-[#1F2229] text-white focus:border-amber-500' : 'bg-slate-50 border-slate-200 text-slate-900 focus:border-amber-500'
+                }`}
+              />
+            </div>
+
+            <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
+              {/* Sede */}
+              <select
+                value={selectedBranch}
+                onChange={(e) => setSelectedBranch(e.target.value)}
+                className={`px-3 py-2 rounded-xl border text-xs outline-hidden ${
+                  isDark ? 'bg-[#0D0F14] border-[#1F2229] text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
+                }`}
+              >
+                <option value="TODAS">Sede: Todas</option>
+                <option value="KO">KO (Coari)</option>
+                <option value="BE">BE (Belém)</option>
+                <option value="MN">MN (Manaus)</option>
+                <option value="SP">SP (São Paulo)</option>
+                <option value="RJ">RJ (Rio de Janeiro)</option>
+              </select>
+
+              {/* Grau */}
+              <select
+                value={selectedGrau}
+                onChange={(e) => setSelectedGrau(e.target.value)}
+                className={`px-3 py-2 rounded-xl border text-xs outline-hidden ${
+                  isDark ? 'bg-[#0D0F14] border-[#1F2229] text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
+                }`}
+              >
+                <option value="TODOS">Grau: Todos</option>
+                <option value="40%">40% (Máximo)</option>
+                <option value="20%">20% (Médio)</option>
+                <option value="10%">10% (Mínimo)</option>
+              </select>
+
+              {/* Data Início */}
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                title="Data Inicial"
+                className={`px-2.5 py-2 rounded-xl border text-xs outline-hidden ${
+                  isDark ? 'bg-[#0D0F14] border-[#1F2229] text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
+                }`}
+              />
+
+              {/* Data Fim */}
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                title="Data Final"
+                className={`px-2.5 py-2 rounded-xl border text-xs outline-hidden ${
+                  isDark ? 'bg-[#0D0F14] border-[#1F2229] text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
+                }`}
+              />
+
+              {(searchQuery || selectedBranch !== 'TODAS' || selectedGrau !== 'TODOS' || startDate || endDate) && (
+                <button
+                  onClick={() => {
+                    setSearchQuery('');
+                    setSelectedBranch('TODAS');
+                    setSelectedGrau('TODOS');
+                    setStartDate('');
+                    setEndDate('');
+                  }}
+                  className={`px-3 py-2 rounded-xl border text-xs font-bold transition-colors cursor-pointer ${
+                    isDark ? 'border-red-500/30 text-red-400 hover:bg-red-500/10' : 'border-red-200 text-red-600 hover:bg-red-50'
+                  }`}
+                >
+                  Limpar
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Tabela de Lançamentos */}
+          <div className={`rounded-2xl border overflow-hidden shadow-xs ${
+            isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200'
+          }`}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className={`border-b font-bold uppercase tracking-wider text-[11px] ${
+                    isDark ? 'bg-[#0D0F14] border-[#1F2229] text-[#8E9299]' : 'bg-slate-50 border-slate-200 text-slate-500'
+                  }`}>
+                    <th className="p-3.5">Data Evento</th>
+                    <th className="p-3.5">Colaborador / Matrícula</th>
+                    <th className="p-3.5">Sede / Função</th>
+                    <th className="p-3.5">Atividade Desempenhada</th>
+                    <th className="p-3.5 text-center">Grau NR-15</th>
+                    <th className="p-3.5 text-center">Tempo Exposto</th>
+                    <th className="p-3.5">Responsável</th>
+                    <th className="p-3.5 text-center">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className={`divide-y ${isDark ? 'divide-[#1F2229]' : 'divide-slate-200'}`}>
+                  {filteredRecords.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-8 text-center">
+                        <div className="max-w-xs mx-auto space-y-2">
+                          <AlertTriangle className="w-8 h-8 text-amber-500/40 mx-auto" />
+                          <p className={`font-bold ${isDark ? 'text-gray-300' : 'text-slate-700'}`}>
+                            Nenhum apontamento encontrado
+                          </p>
+                          <p className={`text-xs ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+                            Use o botão "Lançar Atividade Insalubre" para registrar novos serviços de canteiro.
+                          </p>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredRecords.map((rec) => (
+                      <tr 
+                        key={rec.id} 
+                        className={`transition-colors ${
+                          isDark ? 'hover:bg-[#1A1D24]' : 'hover:bg-slate-50/80'
+                        }`}
+                      >
+                        <td className="p-3.5 font-mono whitespace-nowrap">
+                          {rec.dataEvento.split('-').reverse().join('/')}
+                        </td>
+                        <td className="p-3.5">
+                          <div className="font-bold">{rec.nomeColaborador}</div>
+                          <div className={`font-mono text-[11px] ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+                            Mat: {rec.matricula}
+                          </div>
+                        </td>
+                        <td className="p-3.5">
+                          <div className="flex items-center gap-1.5">
+                            <span className={`px-1.5 py-0.2 rounded font-mono font-bold text-[10px] ${
+                              isDark ? 'bg-blue-500/10 text-blue-400' : 'bg-blue-50 text-blue-700'
+                            }`}>
+                              {rec.sede}
+                            </span>
+                            <span className="truncate max-w-[140px]" title={rec.funcao}>
+                              {rec.funcao}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="p-3.5">
+                          <div className="font-medium text-slate-200 dark:text-slate-200">
+                            {rec.atividadeDesempenhada}
+                          </div>
+                          {rec.observacoes && (
+                            <div className={`text-[11px] mt-0.5 truncate max-w-xs ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`} title={rec.observacoes}>
+                              Obs: {rec.observacoes}
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-3.5 text-center whitespace-nowrap">
+                          <span className={`px-2.5 py-1 rounded-full font-mono font-bold text-xs ${getGrauBadge(rec.grauExposicao)}`}>
+                            {rec.grauExposicao}
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-center font-mono font-bold whitespace-nowrap">
+                          {rec.quantidadeHorasDias} {rec.unidade === 'HORAS' ? 'h' : 'dias'}
+                        </td>
+                        <td className="p-3.5 text-[11px] text-[#8E9299]">
+                          {rec.responsavelLancamento}
+                        </td>
+                        <td className="p-3.5 text-center">
+                          <button
+                            onClick={() => handleDelete(rec.id, rec.nomeColaborador)}
+                            title="Excluir lançamento"
+                            className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                              isDark ? 'text-red-400 hover:bg-red-500/10' : 'text-red-600 hover:bg-red-50'
+                            }`}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================= */}
+      {/* SUB-VIEW 2: COLABORADORES COM ADICIONAL FIXO                  */}
+      {/* ============================================================= */}
+      {activeSubTab === 'FIXA' && (
+        <div className="space-y-4">
+          <div className={`p-4 rounded-2xl border flex items-center justify-between ${
+            isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200'
+          }`}>
+            <div>
+              <h3 className="font-bold text-sm">Quadro de Insalubridade Fixa (Em Ficha Funcional)</h3>
+              <p className={`text-xs ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+                Colaboradores com percentual fixo contratual garantido em folha de pagamento
+              </p>
+            </div>
+            <span className={`px-3 py-1 rounded-full text-xs font-mono font-bold ${
+              isDark ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-blue-50 text-blue-700 border border-blue-200'
+            }`}>
+              Total: {stats.fixedCount.totalComAdicional} com adicional
+            </span>
+          </div>
+
+          <div className={`rounded-2xl border overflow-hidden shadow-xs ${
+            isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200'
+          }`}>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className={`border-b font-bold uppercase tracking-wider text-[11px] ${
+                    isDark ? 'bg-[#0D0F14] border-[#1F2229] text-[#8E9299]' : 'bg-slate-50 border-slate-200 text-slate-500'
+                  }`}>
+                    <th className="p-3.5">Matrícula</th>
+                    <th className="p-3.5">Colaborador</th>
+                    <th className="p-3.5">Sede</th>
+                    <th className="p-3.5">Função / Cargo</th>
+                    <th className="p-3.5 text-center">Grau Fixo Atual</th>
+                    <th className="p-3.5 text-center">Status</th>
+                    {onUpdateEmployeeGrauFixa && <th className="p-3.5 text-center">Ação Rápida</th>}
+                  </tr>
+                </thead>
+                <tbody className={`divide-y ${isDark ? 'divide-[#1F2229]' : 'divide-slate-200'}`}>
+                  {employees
+                    .filter(e => e.grauInsalubridadeFixa && e.grauInsalubridadeFixa !== 'ISENTO')
+                    .map((emp) => (
+                      <tr key={emp.id} className={isDark ? 'hover:bg-[#1A1D24]' : 'hover:bg-slate-50'}>
+                        <td className="p-3.5 font-mono font-bold">{emp.matricula}</td>
+                        <td className="p-3.5 font-bold">{emp.nome}</td>
+                        <td className="p-3.5 font-mono">{emp.sede_atual || emp.sede}</td>
+                        <td className="p-3.5">{emp.funcao || emp.cargo}</td>
+                        <td className="p-3.5 text-center">
+                          <span className={`px-2.5 py-1 rounded-full font-mono font-bold text-xs ${getGrauBadge(emp.grauInsalubridadeFixa || 'ISENTO')}`}>
+                            {emp.grauInsalubridadeFixa}
+                          </span>
+                        </td>
+                        <td className="p-3.5 text-center">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            emp.status === 'Ativo' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'
+                          }`}>
+                            {emp.status}
+                          </span>
+                        </td>
+                        {onUpdateEmployeeGrauFixa && (
+                          <td className="p-3.5 text-center">
+                            <select
+                              value={emp.grauInsalubridadeFixa || 'ISENTO'}
+                              onChange={(e) => onUpdateEmployeeGrauFixa(emp.id, e.target.value as GrauInsalubridade)}
+                              className={`px-2 py-1 rounded-lg border text-[11px] outline-hidden ${
+                                isDark ? 'bg-[#0D0F14] border-[#1F2229] text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
+                              }`}
+                            >
+                              <option value="ISENTO">ISENTO</option>
+                              <option value="10%">10% (Mínimo)</option>
+                              <option value="20%">20% (Médio)</option>
+                              <option value="40%">40% (Máximo)</option>
+                            </select>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================= */}
+      {/* SUB-VIEW 3: GUIA TÉCNICO NR-15 COMARA                         */}
+      {/* ============================================================= */}
+      {activeSubTab === 'GUIA_NR15' && (
+        <div className="space-y-4">
+          <div className={`p-5 rounded-2xl border ${
+            isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200'
+          }`}>
+            <h3 className="font-bold text-sm mb-1 flex items-center gap-2">
+              <Flame className="w-4 h-4 text-amber-400" />
+              <span>Matriz de Atividades Típicas em Canteiros da COMARA (NR-15)</span>
+            </h3>
+            <p className={`text-xs mb-4 ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+              Referência operacional para encarregados, chefes de canteiro e equipe de segurança do trabalho
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              {ATIVIDADES_TIPICAS_COMARA.map((ativ, idx) => (
+                <div 
+                  key={idx} 
+                  className={`p-4 rounded-xl border flex flex-col justify-between gap-2.5 ${
+                    isDark ? 'bg-[#0D0F14] border-[#1F2229]' : 'bg-slate-50 border-slate-200'
+                  }`}
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                      <h4 className="font-bold text-xs">{ativ.nome}</h4>
+                      <span className={`px-2 py-0.5 rounded-full font-mono font-bold text-xs shrink-0 ${getGrauBadge(ativ.grau)}`}>
+                        {ativ.grau}
+                      </span>
+                    </div>
+                    <p className={`text-[11px] ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+                      {ativ.desc}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormAtividade(ativ.nome);
+                      setFormGrau(ativ.grau);
+                      setIsModalOpen(true);
+                    }}
+                    className={`text-[11px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer pt-1 border-t ${
+                      isDark ? 'border-[#1F2229]' : 'border-slate-200'
+                    }`}
+                  >
+                    <span>Lançar esta atividade agora</span>
+                    <span>➔</span>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================= */}
+      {/* MODAL: NOVO LANÇAMENTO DE ATIVIDADE INSALUBRE                  */}
+      {/* ============================================================= */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-xs font-mono">
+          <div className={`w-full max-w-xl rounded-2xl border shadow-2xl overflow-hidden relative max-h-[90vh] flex flex-col ${
+            isDark ? 'bg-[#15171C] border-[#1F2229] text-[#E0E2E5]' : 'bg-white border-slate-200 text-slate-900'
+          }`}>
+            {/* Header */}
+            <div className={`p-5 border-b flex items-center justify-between shrink-0 ${
+              isDark ? 'bg-[#0D0F14] border-[#1F2229]' : 'bg-slate-50 border-slate-200'
+            }`}>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center shadow-xs">
+                  <HardHat className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm">Apontamento de Atividade Insalubre</h3>
+                  <p className={`text-[11px] ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+                    Lançamento pontual por demanda / serviço especial
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                  isDark ? 'hover:bg-[#1F2229] text-gray-400' : 'hover:bg-slate-200 text-slate-500'
+                }`}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Scrollable Form Body */}
+            <form onSubmit={handleSubmitRecord} className="p-6 space-y-4 overflow-y-auto text-xs flex-1">
+              {/* Feedback Message */}
+              {formFeedback && (
+                <div className={`p-3 rounded-xl border flex items-center gap-2.5 ${
+                  formFeedback.type === 'success'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                    : 'bg-red-500/10 border-red-500/30 text-red-400'
+                }`}>
+                  {formFeedback.type === 'success' ? (
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                  )}
+                  <span>{formFeedback.text}</span>
+                </div>
+              )}
+
+              {/* 1. Seleção do Colaborador */}
+              <div>
+                <label className={`block font-bold mb-1.5 ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
+                  1. COLABORADOR EXECUTOR *
+                </label>
+                <select
+                  value={formMatricula}
+                  onChange={(e) => setFormMatricula(e.target.value)}
+                  required
+                  className={`w-full px-3.5 py-2.5 rounded-xl border text-xs outline-hidden ${
+                    isDark ? 'bg-[#0D0F14] border-[#1F2229] text-white focus:border-amber-500' : 'bg-slate-50 border-slate-300 text-slate-900 focus:border-amber-500'
+                  }`}
+                >
+                  <option value="">-- Selecione o Colaborador por Matrícula / Nome --</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.matricula}>
+                      {emp.matricula} - {emp.nome} ({emp.sede_atual || emp.sede} • {emp.funcao || emp.cargo})
+                    </option>
+                  ))}
+                </select>
+
+                {selectedEmployeeInForm && (
+                  <div className={`mt-2 p-2.5 rounded-xl border text-[11px] flex items-center justify-between ${
+                    isDark ? 'bg-[#0D0F14] border-[#1F2229] text-gray-300' : 'bg-slate-50 border-slate-200 text-slate-700'
+                  }`}>
+                    <span>Sede: <strong>{selectedEmployeeInForm.sede_atual || selectedEmployeeInForm.sede}</strong></span>
+                    <span>Função: <strong>{selectedEmployeeInForm.funcao || selectedEmployeeInForm.cargo}</strong></span>
+                    <span>Fixo em Ficha: <strong>{selectedEmployeeInForm.grauInsalubridadeFixa || 'ISENTO'}</strong></span>
+                  </div>
+                )}
+              </div>
+
+              {/* 2. Data do Evento */}
+              <div>
+                <label className={`block font-bold mb-1.5 ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
+                  2. DATA DA EXECUÇÃO DO SERVIÇO *
+                </label>
+                <input
+                  type="date"
+                  value={formDataEvento}
+                  onChange={(e) => setFormDataEvento(e.target.value)}
+                  required
+                  className={`w-full px-3.5 py-2.5 rounded-xl border text-xs outline-hidden ${
+                    isDark ? 'bg-[#0D0F14] border-[#1F2229] text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                />
+              </div>
+
+              {/* 3. Atividade Desempenhada com Presets */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className={`font-bold ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
+                    3. ATIVIDADE / AGENTE NOCIVO DESEMPENHADO *
+                  </label>
+                  <span className={`text-[10px] ${isDark ? 'text-[#8E9299]' : 'text-slate-400'}`}>
+                    Sugestões rápidas abaixo
+                  </span>
+                </div>
+
+                <input
+                  type="text"
+                  placeholder="Ex: Aplicação de emulsão asfáltica a quente na pista"
+                  value={formAtividade}
+                  onChange={(e) => setFormAtividade(e.target.value)}
+                  required
+                  className={`w-full px-3.5 py-2.5 rounded-xl border text-xs outline-hidden ${
+                    isDark ? 'bg-[#0D0F14] border-[#1F2229] text-white focus:border-amber-500' : 'bg-slate-50 border-slate-300 text-slate-900 focus:border-amber-500'
+                  }`}
+                />
+
+                {/* Presets buttons */}
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {ATIVIDADES_TIPICAS_COMARA.slice(0, 4).map((p, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => handleSelectPreset(p)}
+                      className={`text-[10px] px-2 py-1 rounded-lg border transition-colors cursor-pointer ${
+                        formAtividade === p.nome
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                          : isDark 
+                            ? 'bg-[#0D0F14] text-gray-400 border-[#1F2229] hover:text-white' 
+                            : 'bg-slate-100 text-slate-600 border-slate-200 hover:text-slate-900'
+                      }`}
+                    >
+                      + {p.nome.split(' (')[0].slice(0, 30)}...
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 4. Grau e Quantidade */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className={`block font-bold mb-1.5 ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
+                    4. GRAU NR-15 *
+                  </label>
+                  <select
+                    value={formGrau}
+                    onChange={(e) => setFormGrau(e.target.value as any)}
+                    className={`w-full px-3 py-2.5 rounded-xl border text-xs outline-hidden font-bold ${
+                      isDark ? 'bg-[#0D0F14] border-[#1F2229] text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                    }`}
+                  >
+                    <option value="10%">10% (Mínimo)</option>
+                    <option value="20%">20% (Médio)</option>
+                    <option value="40%">40% (Máximo)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className={`block font-bold mb-1.5 ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
+                    5. QUANTIDADE *
+                  </label>
+                  <input
+                    type="number"
+                    min="0.5"
+                    step="0.5"
+                    value={formQuantidade}
+                    onChange={(e) => setFormQuantidade(parseFloat(e.target.value) || 0)}
+                    required
+                    className={`w-full px-3 py-2.5 rounded-xl border text-xs outline-hidden font-bold ${
+                      isDark ? 'bg-[#0D0F14] border-[#1F2229] text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className={`block font-bold mb-1.5 ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
+                    6. UNIDADE *
+                  </label>
+                  <select
+                    value={formUnidade}
+                    onChange={(e) => setFormUnidade(e.target.value as any)}
+                    className={`w-full px-3 py-2.5 rounded-xl border text-xs outline-hidden font-bold ${
+                      isDark ? 'bg-[#0D0F14] border-[#1F2229] text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                    }`}
+                  >
+                    <option value="HORAS">HORAS (h)</option>
+                    <option value="DIAS">DIAS (diária)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* 5. Responsável e Observações */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className={`block font-bold mb-1.5 ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
+                    7. RESPONSÁVEL PELO APONTAMENTO
+                  </label>
+                  <input
+                    type="text"
+                    value={formResponsavel}
+                    onChange={(e) => setFormResponsavel(e.target.value)}
+                    placeholder="Encarregado de Campo / Técnico Seg."
+                    className={`w-full px-3.5 py-2.5 rounded-xl border text-xs outline-hidden ${
+                      isDark ? 'bg-[#0D0F14] border-[#1F2229] text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <label className={`block font-bold mb-1.5 ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
+                    8. OBSERVAÇÕES (OPCIONAL)
+                  </label>
+                  <input
+                    type="text"
+                    value={formObservacoes}
+                    onChange={(e) => setFormObservacoes(e.target.value)}
+                    placeholder="Ex: Trecho Pista Cabeceira 08"
+                    className={`w-full px-3.5 py-2.5 rounded-xl border text-xs outline-hidden ${
+                      isDark ? 'bg-[#0D0F14] border-[#1F2229] text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                    }`}
+                  />
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-4 border-t flex items-center justify-end gap-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className={`px-4 py-2.5 rounded-xl border font-bold transition-colors cursor-pointer ${
+                    isDark ? 'border-[#2A2E38] hover:bg-[#1F2229] text-gray-300' : 'border-slate-300 hover:bg-slate-100 text-slate-700'
+                  }`}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-6 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold transition-all shadow-md shadow-amber-600/20 active:scale-98 cursor-pointer disabled:opacity-50"
+                >
+                  {isSubmitting ? 'Gravando...' : 'Salvar Apontamento'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+        </>
+      )}
+    </div>
+  );
+};
