@@ -140,10 +140,6 @@ export function parseEmployeesCSV(
             row,
             'nomecompleto', 'nome_completo', 'nome', 'colaborador', 'funcionario', 'name'
           );
-          const cpfRaw = getRowValue(
-            row,
-            'cpf', 'documento', 'cpf_numero'
-          );
           const departamentoRaw = getRowValue(
             row,
             'departamentonome', 'departamento_nome', 'departamento', 'depto', 'setor'
@@ -155,14 +151,6 @@ export function parseEmployeesCSV(
           const dataAdmissaoRaw = getRowValue(
             row,
             'dataadmissao', 'data_admissao', 'admissao', 'hiredate'
-          );
-          const dataNascimentoRaw = getRowValue(
-            row,
-            'datanascimento', 'data_nascimento', 'nascimento', 'birthdate'
-          );
-          const pisRaw = getRowValue(
-            row,
-            'pis', 'pispasep', 'pis_pasep'
           );
           const celularRaw = getRowValue(
             row,
@@ -236,7 +224,6 @@ export function parseEmployeesCSV(
 
           // Tratamento de Datas
           const dataAdmissao = parseDateCell(dataAdmissaoRaw, '2024-01-01');
-          const dataNascimento = dataNascimentoRaw ? parseDateCell(dataNascimentoRaw, '') : undefined;
 
           const parsedSaldo = parseFloat(saldoInicialRaw.replace(',', '.')) || 0;
           const urlFoto = fotoRaw || undefined;
@@ -274,9 +261,6 @@ export function parseEmployeesCSV(
             sede: sedeNormalized,
             sede_origem: sedeNormalized,
             dataAdmissao,
-            dataNascimento,
-            cpf: cpfRaw || undefined,
-            pis: pisRaw || undefined,
             status: statusNormalized,
             email: emailRaw || undefined,
             telefone: celularRaw || undefined,
@@ -454,15 +438,14 @@ export function parseTimeRecordsCSV(
 
 /**
  * Gera um arquivo CSV modelo para cadastro de colaboradores no padrão oficial:
- * Matricula;Nome;CPF;DataNascimento;Funcao;Sede;Status;SenhaInicial
+ * Matricula;Nome;Email;Funcao;Sede;Status;SenhaInicial
  */
 export function generateEmployeesTemplateCSV(): string {
   const sampleData = [
     {
       Matricula: 'MAT-2001',
       Nome: 'Ana Carolina Peixoto',
-      CPF: '123.456.789-01',
-      DataNascimento: '1992-05-14',
+      Email: 'ana.peixoto@comara.aer.mil.br',
       Funcao: 'Supervisora de Operações',
       Sede: 'KO',
       Status: 'Ativo',
@@ -471,8 +454,7 @@ export function generateEmployeesTemplateCSV(): string {
     {
       Matricula: 'MAT-2002',
       Nome: 'Bruno Cesar Barreto',
-      CPF: '234.567.890-12',
-      DataNascimento: '1988-11-20',
+      Email: 'bruno.barreto@comara.aer.mil.br',
       Funcao: 'Técnico de Manutenção',
       Sede: 'BE',
       Status: 'Ativo',
@@ -481,8 +463,7 @@ export function generateEmployeesTemplateCSV(): string {
     {
       Matricula: 'MAT-2003',
       Nome: 'Carla Vasconcelos Lima',
-      CPF: '345.678.901-23',
-      DataNascimento: '1995-03-08',
+      Email: 'carla.lima@comara.aer.mil.br',
       Funcao: 'Engenheira de Segurança',
       Sede: 'MN',
       Status: 'Ativo',

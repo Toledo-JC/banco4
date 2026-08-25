@@ -33,7 +33,9 @@ import {
   HelpCircle,
   AlertCircle,
   Biohazard,
-  Shield
+  Shield,
+  Pencil,
+  Trash2
 } from 'lucide-react';
 import { exportTimeRecordsToLookerCSV, triggerFileDownload } from '../utils/csvHandler';
 
@@ -45,6 +47,8 @@ interface EmployeeStatementProps {
   onSelectMatricula: (matricula: string) => void;
   onBack: () => void;
   onOpenNewEntry: (matricula: string) => void;
+  onOpenEditEntry?: (record: TimeRecord) => void;
+  onDeleteRecord?: (id: string) => void | Promise<void>;
   onViewAttachment: (attachment: Attachment, empName?: string, recordDate?: string) => void;
   theme?: 'dark' | 'light';
 }
@@ -59,6 +63,8 @@ export const EmployeeStatement: React.FC<EmployeeStatementProps> = ({
   onSelectMatricula,
   onBack,
   onOpenNewEntry,
+  onOpenEditEntry,
+  onDeleteRecord,
   onViewAttachment,
   theme = 'dark',
 }) => {
@@ -540,7 +546,7 @@ export const EmployeeStatement: React.FC<EmployeeStatementProps> = ({
                 <th className="py-3 px-4 text-right">Saldo Remanescente</th>
                 <th className="py-3 px-4">Rastreio Baixa / Origem (FIFO)</th>
                 <th className="py-3 px-4 text-center">Comprovante</th>
-                <th className="py-3 px-4 text-center">Detalhes</th>
+                <th className="py-3 px-4 text-center">Ações</th>
               </tr>
             </thead>
             <tbody className={`divide-y ${
@@ -692,17 +698,47 @@ export const EmployeeStatement: React.FC<EmployeeStatementProps> = ({
                           )}
                         </td>
 
-                        {/* Detalhes Expansíveis */}
+                        {/* Ações & Detalhes */}
                         <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                          <button
-                            onClick={() => toggleExpandRecord(rec.id)}
-                            className={`p-1 rounded transition-colors ${
-                              isDark ? 'hover:bg-[#2A2E38] text-[#8E9299]' : 'hover:bg-slate-200 text-slate-500'
-                            }`}
-                            title="Ver detalhes de rastreabilidade"
-                          >
-                            {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                          </button>
+                          <div className="flex items-center justify-center gap-1.5">
+                            {onOpenEditEntry && (
+                              <button
+                                onClick={() => onOpenEditEntry(rec)}
+                                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                  isDark ? 'text-amber-400 hover:bg-amber-500/10' : 'text-amber-600 hover:bg-amber-50'
+                                }`}
+                                title="Editar / Corrigir este lançamento"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+
+                            {onDeleteRecord && (
+                              <button
+                                onClick={() => {
+                                  if (window.confirm(`Deseja realmente excluir o lançamento de ${rec.dataRegistro}?`)) {
+                                    onDeleteRecord(rec.id);
+                                  }
+                                }}
+                                className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                  isDark ? 'text-red-400 hover:bg-red-500/10' : 'text-red-600 hover:bg-red-50'
+                                }`}
+                                title="Excluir lançamento"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+
+                            <button
+                              onClick={() => toggleExpandRecord(rec.id)}
+                              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                isDark ? 'hover:bg-[#2A2E38] text-[#8E9299]' : 'hover:bg-slate-200 text-slate-500'
+                              }`}
+                              title="Ver detalhes de rastreabilidade"
+                            >
+                              {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                            </button>
+                          </div>
                         </td>
                       </tr>
 
@@ -712,18 +748,32 @@ export const EmployeeStatement: React.FC<EmployeeStatementProps> = ({
                           <td colSpan={8} className="p-4 space-y-3">
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs font-mono">
                               {/* Coluna 1: Dados do Lançamento */}
-                              <div className={`p-3 rounded-xl border ${isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200'}`}>
-                                <div className="font-bold text-blue-400 mb-1 flex items-center gap-1.5">
-                                  <FileText className="w-3.5 h-3.5" />
-                                  <span>Dados do Lançamento</span>
+                              <div className={`p-3 rounded-xl border flex flex-col justify-between ${isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200'}`}>
+                                <div>
+                                  <div className="font-bold text-blue-400 mb-1 flex items-center gap-1.5">
+                                    <FileText className="w-3.5 h-3.5" />
+                                    <span>Dados do Lançamento</span>
+                                  </div>
+                                  <div className="space-y-0.5 text-[11px]">
+                                    <div>ID Registro: <span className="font-bold">{rec.id}</span></div>
+                                    <div>Horas Brutas: <span className="font-bold">{rec.horasBrutas}h</span></div>
+                                    <div>Multiplicador SPTF: <span className="font-bold">{rec.multiplicador}x</span></div>
+                                    <div>Criado Em: <span className="font-bold">{rec.criadoEm || rec.dataRegistro}</span></div>
+                                    {rec.observacao && <div>Observação: <span className="italic">{rec.observacao}</span></div>}
+                                  </div>
                                 </div>
-                                <div className="space-y-0.5 text-[11px]">
-                                  <div>ID Registro: <span className="font-bold">{rec.id}</span></div>
-                                  <div>Horas Brutas: <span className="font-bold">{rec.horasBrutas}h</span></div>
-                                  <div>Multiplicador SPTF: <span className="font-bold">{rec.multiplicador}x</span></div>
-                                  <div>Criado Em: <span className="font-bold">{rec.criadoEm || rec.dataRegistro}</span></div>
-                                  {rec.observacao && <div>Observação: <span className="italic">{rec.observacao}</span></div>}
-                                </div>
+
+                                {onOpenEditEntry && (
+                                  <div className="pt-2 mt-2 border-t border-[#1F2229] flex items-center gap-2">
+                                    <button
+                                      onClick={() => onOpenEditEntry(rec)}
+                                      className="px-2.5 py-1 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                                    >
+                                      <Pencil className="w-3 h-3" />
+                                      <span>Editar Lançamento</span>
+                                    </button>
+                                  </div>
+                                )}
                               </div>
 
                               {/* Coluna 2: Histórico de Liquidações FIFO */}

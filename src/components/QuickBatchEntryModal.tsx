@@ -38,6 +38,7 @@ interface QuickBatchEntryModalProps {
   onSave?: (records: TimeRecord[] | TimeRecord) => void;
   onSuccess?: () => void;
   refreshData?: () => void;
+  userRole?: string;
   theme?: 'dark' | 'light';
 }
 
@@ -63,14 +64,23 @@ export const QuickBatchEntryModal: React.FC<QuickBatchEntryModalProps> = ({
   onSave,
   onSuccess,
   refreshData,
+  userRole,
   theme = 'dark',
 }) => {
   const isDark = theme === 'dark';
+  const isAuxDA = userRole === 'AUX_DA' || userRole === 'AUXILIAR_DA';
   const modalId = useId();
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
 
   // Modo de operação
   const [activeMode, setActiveMode] = useState<BatchMode>('MULTI_SELECAO');
+
+  // Assegurar que se for Aux de DA, força o modo Multi-Seleção
+  React.useEffect(() => {
+    if (isAuxDA && activeMode !== 'MULTI_SELECAO') {
+      setActiveMode('MULTI_SELECAO');
+    }
+  }, [isAuxDA, activeMode]);
 
   // Estados comuns
   const [dataRegistro, setDataRegistro] = useState(todayStr);
@@ -571,42 +581,48 @@ export const QuickBatchEntryModal: React.FC<QuickBatchEntryModalProps> = ({
             )}
           </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveMode('GRADE_DIARIA');
-              setFeedback(null);
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-              activeMode === 'GRADE_DIARIA'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : isDark ? 'text-[#8E9299] hover:text-white hover:bg-[#1F2229]' : 'text-slate-600 hover:text-slate-900 hover:bg-white'
-            }`}
-          >
-            <Table className="w-3.5 h-3.5" />
-            <span>2. Grade Diária Operacional</span>
-          </button>
+          {/* Modo 2: Grade Diária Operacional - Oculto para Aux de DA */}
+          {!isAuxDA && (
+            <button
+              type="button"
+              onClick={() => {
+                setActiveMode('GRADE_DIARIA');
+                setFeedback(null);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                activeMode === 'GRADE_DIARIA'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : isDark ? 'text-[#8E9299] hover:text-white hover:bg-[#1F2229]' : 'text-slate-600 hover:text-slate-900 hover:bg-white'
+              }`}
+            >
+              <Table className="w-3.5 h-3.5" />
+              <span>2. Grade Diária Operacional</span>
+            </button>
+          )}
 
-          <button
-            type="button"
-            onClick={() => {
-              setActiveMode('FLUXO_RAPIDO');
-              setFeedback(null);
-            }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-              activeMode === 'FLUXO_RAPIDO'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : isDark ? 'text-[#8E9299] hover:text-white hover:bg-[#1F2229]' : 'text-slate-600 hover:text-slate-900 hover:bg-white'
-            }`}
-          >
-            <Zap className="w-3.5 h-3.5" />
-            <span>3. Fluxo Rápido (1 a 1 com Enter)</span>
-            {consecutiveCount > 0 && (
-              <span className="ml-1 px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-mono">
-                +{consecutiveCount}
-              </span>
-            )}
-          </button>
+          {/* Modo 3: Fluxo Rápido - Oculto para Aux de DA */}
+          {!isAuxDA && (
+            <button
+              type="button"
+              onClick={() => {
+                setActiveMode('FLUXO_RAPIDO');
+                setFeedback(null);
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                activeMode === 'FLUXO_RAPIDO'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : isDark ? 'text-[#8E9299] hover:text-white hover:bg-[#1F2229]' : 'text-slate-600 hover:text-slate-900 hover:bg-white'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5" />
+              <span>3. Fluxo Rápido (1 a 1 com Enter)</span>
+              {consecutiveCount > 0 && (
+                <span className="ml-1 px-1.5 py-0.2 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-mono">
+                  +{consecutiveCount}
+                </span>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Feedback Banner */}

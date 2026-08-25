@@ -24,6 +24,7 @@ export interface LaunchModalProps {
   employees: Employee[];
   onSaveRecord: (record: TimeRecord) => void;
   preselectedMatricula?: string;
+  preselectedDate?: string;
   theme?: 'dark' | 'light';
 }
 
@@ -33,6 +34,7 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({
   employees,
   onSaveRecord,
   preselectedMatricula,
+  preselectedDate,
   theme = 'dark',
 }) => {
   const isDark = theme === 'dark';
@@ -40,7 +42,7 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({
   const todayStr = new Date().toISOString().split('T')[0];
 
   const [matricula, setMatricula] = useState<string>(preselectedMatricula || (employees[0]?.matricula || ''));
-  const [dataRegistro, setDataRegistro] = useState<string>(todayStr);
+  const [dataRegistro, setDataRegistro] = useState<string>(preselectedDate || todayStr);
   const [tipoOcorrencia, setTipoOcorrencia] = useState<OccurrenceType>('TRABALHO');
   const [horasBrutas, setHorasBrutas] = useState<number>(2.0);
   const [eFeriadoManual, setEFeriadoManual] = useState<boolean>(false);
@@ -52,12 +54,16 @@ export const LaunchModal: React.FC<LaunchModalProps> = ({
   const selectedEmployee = employees.find(e => e.matricula === matricula);
 
   useEffect(() => {
+    if (!isOpen) return;
     if (preselectedMatricula) {
       setMatricula(preselectedMatricula);
     } else if (!matricula && employees.length > 0) {
       setMatricula(employees[0].matricula);
     }
-  }, [preselectedMatricula, employees]);
+    if (preselectedDate) {
+      setDataRegistro(preselectedDate);
+    }
+  }, [isOpen, preselectedMatricula, preselectedDate, employees]);
 
   useEffect(() => {
     if (tipoOcorrencia === 'FALTA_INJUSTIFICADA') {

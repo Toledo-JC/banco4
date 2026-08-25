@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Employee, TimeRecord, Attachment, AdminUser, AuthSession, InsalubrityRecord, SystemConfig, GrauInsalubridade, ConstructionSite } from './types';
+import { Employee, TimeRecord, Attachment, AdminUser, AdminRole, AuthSession, InsalubrityRecord, SystemConfig, GrauInsalubridade, ConstructionSite } from './types';
 import { storageService } from './services/storageService';
 import { firestoreService, BatchProgressInfo } from './services/firestoreService';
 import { auth, googleProvider, testFirestoreConnection, isPermissionError } from './services/firebase';
@@ -30,6 +30,7 @@ import { InsalubrityManagement } from './components/InsalubrityManagement';
 import { CanteirosManagement } from './components/CanteirosManagement';
 import { ExecutiveReportsView } from './components/ExecutiveReportsView';
 import { ComaraLogoModal } from './components/ComaraLogoModal';
+import { DatabaseSafetyActionModal, SafetyActionType } from './components/DatabaseSafetyActionModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { CheckCircle2, AlertCircle, Cloud, RefreshCw, X, Database } from 'lucide-react';
 
@@ -37,7 +38,7 @@ export default function App() {
   // Auth State
   const [currentUser, setCurrentUser] = useState<FirebaseUser | AuthSession | null>(() => authService.getCurrentSession());
   const [isAuthLoading, setIsAuthLoading] = useState(true);
-  const [userRole, setUserRole] = useState<'SUPER_ADMIN' | 'GESTOR_RH' | 'AUDITOR' | 'CHEFE_CANTEIRO' | 'ROLE_GERENTE' | 'GERENTE_CAMPO'>(() => {
+  const [userRole, setUserRole] = useState<AdminRole>(() => {
     const session = authService.getCurrentSession();
     return session?.role || 'SUPER_ADMIN';
   });
@@ -57,6 +58,8 @@ export default function App() {
 
   // Modals state
   const [isLogoModalOpen, setIsLogoModalOpen] = useState(false);
+  const [isSafetyModalOpen, setIsSafetyModalOpen] = useState(false);
+  const [safetyActionType, setSafetyActionType] = useState<SafetyActionType>('CLEAR_DATABASE');
 
   // Firestore Status / Error Handling State
   const [firestoreErrorNotice, setFirestoreErrorNotice] = useState<string | null>(null);
@@ -75,9 +78,11 @@ export default function App() {
 
   // Modals state
   const [isDailyEntryModalOpen, setIsDailyEntryModalOpen] = useState(false);
+  const [dailyEntryInitialRecord, setDailyEntryInitialRecord] = useState<TimeRecord | null>(null);
   const [isQuickBatchModalOpen, setIsQuickBatchModalOpen] = useState(false);
   const [isImportRecordsModalOpen, setIsImportRecordsModalOpen] = useState(false);
   const [dailyEntryPreselectedMatricula, setDailyEntryPreselectedMatricula] = useState<string | undefined>();
+  const [dailyEntryPreselectedDate, setDailyEntryPreselectedDate] = useState<string | undefined>();
   
   // Certificate Preview Modal
   const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null);
@@ -506,42 +511,149 @@ export default function App() {
     }
   };
 
-  // Firestore Write: Limpar Base Central
-  const handleClearData = async () => {
+  // -------------------------------------------------------------
+  // Safety Intercept Handlers para Destructive Actions
+  // -------------------------------------------------------------
+  const handleTriggerClearDataSafety = () => {
     if (userRole === 'AUDITOR') {
       showToast('Ação bloqueada: Auditores possuem apenas permissão de leitura.', 'error');
       return;
     }
+    setSafetyActionType('CLEAR_DATABASE');
+    setIsSafetyModalOpen(true);
+  };
 
-    if (window.confirm('Deseja limpar todos os registros do Cloud Firestore para importar a base real de colaboradores e lançamentos?')) {
-      try {
-        await firestoreService.clearAllData();
-        storageService.clearAllData();
-        setEmployees([]);
-        setRecords([]);
-        setSelectedMatricula('');
-        showToast('Base Cloud Firestore limpa com sucesso! Pronto para importar seu CSV.', 'success');
-      } catch (error: any) {
-        console.error('Erro ao limpar Firestore:', error);
-        if (isPermissionError(error)) {
-          setFirestoreErrorNotice('Erro de permissão no banco de dados. Verifique a autenticação.');
-        }
-        storageService.clearAllData();
-        setEmployees([]);
-        setRecords([]);
-        setSelectedMatricula('');
-        showToast('Base limpa localmente.', 'info');
+  const handleTriggerLoadMocksSafety = () => {
+    if (userRole === 'AUDITOR') {
+      showToast('Ação bloqueada: Auditores possuem apenas permissão de leitura.', 'error');
+      return;
+    }
+    setSafetyActionType('LOAD_MOCKS');
+    setIsSafetyModalOpen(true);
+  };
+
+  const handleExecuteClearDatabase = async () => {
+    try {
+      await firestoreService.clearAllData();
+      storageService.clearAllData();
+      setEmployees([]);
+      setRecords([]);
+      setInsalubrityRecords([]);
+      setSelectedMatricula('');
+      showToast('Base Central limpa com sucesso! Pronto para importar nova base.', 'success');
+    } catch (error: any) {
+      console.error('Erro ao limpar Firestore:', error);
+      if (isPermissionError(error)) {
+        setFirestoreErrorNotice('Erro de permissão no banco de dados. Verifique a autenticação.');
       }
+      storageService.clearAllData();
+      setEmployees([]);
+      setRecords([]);
+      setInsalubrityRecords([]);
+      setSelectedMatricula('');
+      showToast('Base limpa localmente.', 'info');
     }
   };
 
-  const handleOpenNewEntry = (matricula?: string) => {
+  const handleExecuteLoadMocks = async () => {
+    try {
+      storageService.resetToDefaults();
+      const mockEmps = storageService.getEmployees();
+      const mockRecs = storageService.getTimeRecords();
+      const mockInsalubrity = storageService.getInsalubrityRecords();
+      
+      // Sincronizar com Firestore se ativo
+      try {
+        await firestoreService.importEmployeesBatch(mockEmps);
+        await firestoreService.importTimeRecordsBatch(mockRecs);
+        if (mockInsalubrity.length > 0) {
+          await firestoreService.saveInsalubrityBatch(mockInsalubrity);
+        }
+      } catch (fErr) {
+        console.warn('Fallback para Firestore ao gravar mocks:', fErr);
+      }
+
+      setEmployees(mockEmps);
+      setRecords(mockRecs);
+      setInsalubrityRecords(mockInsalubrity);
+      if (mockEmps.length > 0) {
+        setSelectedMatricula(mockEmps[0].matricula);
+      }
+      showToast('Exemplos de demonstração e canteiros carregados com sucesso!', 'success');
+    } catch (err: any) {
+      console.error('Erro ao carregar mocks:', err);
+      const mockEmps = storageService.getEmployees();
+      const mockRecs = storageService.getTimeRecords();
+      setEmployees(mockEmps);
+      setRecords(mockRecs);
+      showToast('Exemplos carregados no cache local.', 'info');
+    }
+  };
+
+  const handleRestoreSnapshot = async (snapshot: any) => {
+    try {
+      if (snapshot.data?.employees) {
+        await firestoreService.importEmployeesBatch(snapshot.data.employees);
+        storageService.saveEmployees(snapshot.data.employees);
+        setEmployees(snapshot.data.employees);
+      }
+      if (snapshot.data?.records) {
+        await firestoreService.importTimeRecordsBatch(snapshot.data.records);
+        storageService.saveTimeRecords(snapshot.data.records);
+        setRecords(snapshot.data.records);
+      }
+      if (snapshot.data?.insalubrityRecords) {
+        await firestoreService.saveInsalubrityBatch(snapshot.data.insalubrityRecords);
+        for (const r of snapshot.data.insalubrityRecords) {
+          storageService.saveInsalubrityRecord(r);
+        }
+        setInsalubrityRecords(snapshot.data.insalubrityRecords);
+      }
+      showToast(`Ponto de restauração de ${snapshot.formattedDate} restaurado com sucesso!`, 'success');
+    } catch (err: any) {
+      console.error('Erro ao restaurar backup:', err);
+      showToast('Falha ao restaurar ponto de restauração.', 'error');
+    }
+  };
+
+  const handleOpenNewEntry = (matricula?: string, defaultDate?: string) => {
     if (userRole === 'AUDITOR' || userMode === 'COLABORADOR') {
       showToast('Ação bloqueada: Seu nível de acesso não permite inclusão manual de lançamentos.', 'error');
       return;
     }
+    setDailyEntryInitialRecord(null);
     setDailyEntryPreselectedMatricula(matricula || (employees[0]?.matricula || ''));
+    setDailyEntryPreselectedDate(defaultDate);
     setIsDailyEntryModalOpen(true);
+  };
+
+  const handleOpenEditEntry = (record: TimeRecord) => {
+    if (userRole === 'AUDITOR' || userMode === 'COLABORADOR') {
+      showToast('Ação bloqueada: Seu nível de acesso não permite alteração de lançamentos.', 'error');
+      return;
+    }
+    setDailyEntryInitialRecord(record);
+    setDailyEntryPreselectedMatricula(record.matricula);
+    setDailyEntryPreselectedDate(record.dataRegistro || record.data_ocorrencia);
+    setIsDailyEntryModalOpen(true);
+  };
+
+  const handleDeleteRecord = async (id: string) => {
+    if (userRole === 'AUDITOR' || userMode === 'COLABORADOR') {
+      showToast('Ação bloqueada: Seu nível de acesso não permite exclusão de lançamentos.', 'error');
+      return;
+    }
+    try {
+      await firestoreService.deleteTimeRecord(id);
+      storageService.deleteTimeRecord(id);
+      setRecords(prev => prev.filter(r => r.id !== id));
+      showToast('Lançamento excluído com sucesso do Cloud Firestore!', 'success');
+    } catch (err: any) {
+      console.error('Erro ao excluir lançamento:', err);
+      storageService.deleteTimeRecord(id);
+      setRecords(prev => prev.filter(r => r.id !== id));
+      showToast('Lançamento removido do cache local.', 'info');
+    }
   };
 
   const handleOpenQuickBatchModal = () => {
@@ -888,8 +1000,8 @@ export default function App() {
         onSelectTab={setActiveTab}
         onOpenNewEntry={() => handleOpenNewEntry()}
         onOpenQuickBatchModal={handleOpenQuickBatchModal}
-        onResetData={() => {}}
-        onClearData={handleClearData}
+        onResetData={handleTriggerLoadMocksSafety}
+        onClearData={handleTriggerClearDataSafety}
         onOpenImportRecordsModal={() => setIsImportRecordsModalOpen(true)}
         onOpenLogoModal={() => setIsLogoModalOpen(true)}
         systemConfig={systemConfig}
@@ -911,13 +1023,16 @@ export default function App() {
               employees={employees}
               records={records}
               onOpenNewEntryModal={handleOpenNewEntry}
+              onOpenEditEntryModal={handleOpenEditEntry}
+              onDeleteRecord={handleDeleteRecord}
               onViewEmployeeStatement={handleViewStatement}
               onViewAttachment={handleViewAttachment}
               onOpenImportRecordsModal={() => setIsImportRecordsModalOpen(true)}
               onOpenQuickBatchModal={() => setIsQuickBatchModalOpen(true)}
               onNavigateToEmployees={() => setActiveTab('colaboradores')}
-              onResetData={() => {}}
-              onClearData={handleClearData}
+              onResetData={handleTriggerLoadMocksSafety}
+              onClearData={handleTriggerClearDataSafety}
+              userRole={userRole}
               theme={theme}
             />
           )}
@@ -957,6 +1072,7 @@ export default function App() {
               onUpdateSystemConfig={handleSaveSystemConfig}
               constructionSites={constructionSites}
               currentUserEmail={currentUserEmail}
+              userRole={userRole}
               theme={theme}
             />
           )}
@@ -968,6 +1084,9 @@ export default function App() {
               insalubrityRecords={insalubrityRecords}
               systemConfig={systemConfig}
               currentUserEmail={currentUserEmail}
+              userRole={userRole}
+              onSaveInsalubrityBatch={handleSaveInsalubrityBatch}
+              onNavigateToInsalubrity={() => setActiveTab('insalubridade')}
               theme={theme}
             />
           )}
@@ -981,6 +1100,8 @@ export default function App() {
               onSelectMatricula={setSelectedMatricula}
               onBack={() => setActiveTab('dashboard')}
               onOpenNewEntry={(mat) => handleOpenNewEntry(mat)}
+              onOpenEditEntry={handleOpenEditEntry}
+              onDeleteRecord={handleDeleteRecord}
               onViewAttachment={handleViewAttachment}
               theme={theme}
             />
@@ -1035,7 +1156,11 @@ export default function App() {
         onClose={() => setIsDailyEntryModalOpen(false)}
         employees={employees}
         preselectedMatricula={dailyEntryPreselectedMatricula}
+        preselectedDate={dailyEntryPreselectedDate}
+        initialRecord={dailyEntryInitialRecord}
         onSaveRecord={handleSaveRecord}
+        onSaveBatch={handleImportRecordsBatch}
+        onDeleteRecord={handleDeleteRecord}
         theme={theme}
       />
 
@@ -1045,6 +1170,7 @@ export default function App() {
         onClose={() => setIsQuickBatchModalOpen(false)}
         employees={employees}
         onSaveBatch={handleImportRecordsBatch}
+        userRole={userRole}
         theme={theme}
       />
 
@@ -1073,6 +1199,22 @@ export default function App() {
         onClose={() => setIsLogoModalOpen(false)}
         currentConfig={systemConfig}
         onSaveConfig={handleSaveSystemConfig}
+        theme={theme}
+      />
+
+      {/* 6. Modal: Confirmação e Segurança de Banco de Dados com Ponto de Restauração */}
+      <DatabaseSafetyActionModal
+        isOpen={isSafetyModalOpen}
+        onClose={() => setIsSafetyModalOpen(false)}
+        actionType={safetyActionType}
+        employees={employees}
+        records={records}
+        insalubrityRecords={insalubrityRecords}
+        constructionSites={constructionSites}
+        systemConfig={systemConfig}
+        onConfirmClear={handleExecuteClearDatabase}
+        onConfirmLoadMocks={handleExecuteLoadMocks}
+        onRestoreSnapshot={handleRestoreSnapshot}
         theme={theme}
       />
     </div>

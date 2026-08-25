@@ -103,10 +103,6 @@ export interface Employee {
   data_fim_status?: string;
   motivoStatus?: string;
   observacao_status?: string;
-  cpf?: string;
-  rg?: string;
-  pis?: string;
-  dataNascimento?: string;
   cargo?: string;
   departamento?: string;
   jornadaTrabalho?: string;

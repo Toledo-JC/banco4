@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Employee, TimeRecord, DashboardFilter, Attachment } from '../types';
+import { Employee, TimeRecord, DashboardFilter, Attachment, AdminRole } from '../types';
 import { 
   formatHoursDecimal, 
   formatHoursToDays, 
@@ -48,7 +48,8 @@ import {
 interface LookerDashboardProps {
   employees: Employee[];
   records: TimeRecord[];
-  onOpenNewEntryModal: (matricula?: string) => void;
+  onOpenNewEntryModal: (matricula?: string, dateIso?: string) => void;
+  onOpenEditEntryModal?: (record: TimeRecord) => void;
   onViewEmployeeStatement: (matricula: string) => void;
   onViewAttachment: (attachment: Attachment, empName?: string, recordDate?: string) => void;
   onOpenImportRecordsModal?: () => void;
@@ -56,6 +57,8 @@ interface LookerDashboardProps {
   onNavigateToEmployees?: () => void;
   onResetData?: () => void;
   onClearData?: () => void;
+  onDeleteRecord?: (id: string) => void | Promise<void>;
+  userRole?: AdminRole | string;
   theme?: 'dark' | 'light';
 }
 
@@ -66,6 +69,7 @@ export const LookerDashboard: React.FC<LookerDashboardProps> = ({
   employees,
   records,
   onOpenNewEntryModal,
+  onOpenEditEntryModal,
   onViewEmployeeStatement,
   onViewAttachment,
   onOpenImportRecordsModal,
@@ -73,9 +77,12 @@ export const LookerDashboard: React.FC<LookerDashboardProps> = ({
   onNavigateToEmployees,
   onResetData,
   onClearData,
+  onDeleteRecord,
+  userRole,
   theme = 'dark',
 }) => {
   const isDark = theme === 'dark';
+  const isAuxDA = userRole === 'AUX_DA' || (userRole as string) === 'AUXILIAR_DA';
 
   // Estado dos Filtros da Barra Superior
   const [filters, setFilters] = useState<DashboardFilter>({
@@ -93,6 +100,13 @@ export const LookerDashboard: React.FC<LookerDashboardProps> = ({
 
   // Aba ativa: Resumo por Colaborador como padrão
   const [activeTab, setActiveTab] = useState<'colaboradores' | 'calendario' | 'por_sede' | 'extrato'>('colaboradores');
+
+  // Assegurar que se for Aux de DA e estiver em aba restrita, volte para colaboradores
+  useEffect(() => {
+    if (isAuxDA && (activeTab === 'por_sede' || activeTab === 'extrato')) {
+      setActiveTab('colaboradores');
+    }
+  }, [isAuxDA, activeTab]);
 
   // Estados de Paginação para Colaboradores
   const [empCurrentPage, setEmpCurrentPage] = useState<number>(1);
@@ -685,128 +699,130 @@ export const LookerDashboard: React.FC<LookerDashboardProps> = ({
         </div>
       )}
 
-      {/* CARDS DE MÉTRICAS (KPIs) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* KPI 1: Saldo Acumulado Geral */}
-        <div className={`p-5 rounded-2xl border shadow-xs transition-all ${
-          isDark 
-            ? 'bg-[#15171C] border-[#1F2229] hover:border-[#2A2E38]' 
-            : 'bg-white border-gray-200 hover:border-gray-300'
-        }`}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-1.5">
-              <p className={`text-xs font-bold uppercase font-mono ${isDark ? 'text-[#8E9299]' : 'text-gray-500'}`}>
-                Saldo Acumulado
-              </p>
-              <InfoTooltip 
-                theme={theme}
-                content="Soma líquida de todas as horas do banco após aplicação de multiplicadores SPTF (Seg-Sex 1.0x, Sáb 1.5x, Dom/Fer 2.0x, Falta -8h)."
-              />
-            </div>
-            <div className={`p-1.5 rounded-lg ${
-              kpis.saldoGeralHoras >= 0 
-                ? isDark ? 'bg-emerald-950/40 text-emerald-400' : 'bg-emerald-50 text-emerald-600'
-                : isDark ? 'bg-red-950/40 text-red-400' : 'bg-red-50 text-red-600'
-            }`}>
-              <Clock className="w-4 h-4" />
-            </div>
-          </div>
-          <h2 className={`text-2xl sm:text-3xl font-mono font-light ${
-            kpis.saldoGeralHoras >= 0 
-              ? isDark ? 'text-green-400' : 'text-emerald-600' 
-              : isDark ? 'text-red-400' : 'text-red-600'
+      {/* CARDS DE MÉTRICAS (KPIs) - Ocultos para Aux de DA */}
+      {!isAuxDA && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* KPI 1: Saldo Acumulado Geral */}
+          <div className={`p-5 rounded-2xl border shadow-xs transition-all ${
+            isDark 
+              ? 'bg-[#15171C] border-[#1F2229] hover:border-[#2A2E38]' 
+              : 'bg-white border-gray-200 hover:border-gray-300'
           }`}>
-            {formatHoursDecimal(kpis.saldoGeralHoras)}
-          </h2>
-          <p className={`text-[10px] mt-1.5 font-mono ${isDark ? 'text-green-400/80' : 'text-emerald-700'}`}>
-            ≈ {formatHoursToDays(kpis.saldoGeralHoras)} (jornada 8h)
-          </p>
-        </div>
-
-        {/* KPI 2: Colaboradores Ativos */}
-        <div className={`p-5 rounded-2xl border shadow-xs transition-all ${
-          isDark 
-            ? 'bg-[#15171C] border-[#1F2229] hover:border-[#2A2E38]' 
-            : 'bg-white border-gray-200 hover:border-gray-300'
-        }`}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-1.5">
-              <p className={`text-xs font-bold uppercase font-mono ${isDark ? 'text-[#8E9299]' : 'text-gray-500'}`}>
-                Colaboradores
-              </p>
-              <InfoTooltip 
-                theme={theme}
-                content="Quantidade de colaboradores com contrato ativo na base. Divididos entre quem possui horas a favor (credores) ou a compensar (devedores)."
-              />
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <p className={`text-xs font-bold uppercase font-mono ${isDark ? 'text-[#8E9299]' : 'text-gray-500'}`}>
+                  Saldo Acumulado
+                </p>
+                <InfoTooltip 
+                  theme={theme}
+                  content="Soma líquida de todas as horas do banco após aplicação de multiplicadores SPTF (Seg-Sex 1.0x, Sáb 1.5x, Dom/Fer 2.0x, Falta -8h)."
+                />
+              </div>
+              <div className={`p-1.5 rounded-lg ${
+                kpis.saldoGeralHoras >= 0 
+                  ? isDark ? 'bg-emerald-950/40 text-emerald-400' : 'bg-emerald-50 text-emerald-600'
+                  : isDark ? 'bg-red-950/40 text-red-400' : 'bg-red-50 text-red-600'
+              }`}>
+                <Clock className="w-4 h-4" />
+              </div>
             </div>
-            <div className={`p-1.5 rounded-lg ${isDark ? 'bg-blue-950/40 text-blue-400' : 'bg-blue-50 text-blue-600'}`}>
-              <Users className="w-4 h-4" />
-            </div>
+            <h2 className={`text-2xl sm:text-3xl font-mono font-light ${
+              kpis.saldoGeralHoras >= 0 
+                ? isDark ? 'text-green-400' : 'text-emerald-600' 
+                : isDark ? 'text-red-400' : 'text-red-600'
+            }`}>
+              {formatHoursDecimal(kpis.saldoGeralHoras)}
+            </h2>
+            <p className={`text-[10px] mt-1.5 font-mono ${isDark ? 'text-green-400/80' : 'text-emerald-700'}`}>
+              ≈ {formatHoursToDays(kpis.saldoGeralHoras)} (jornada 8h)
+            </p>
           </div>
-          <h2 className={`text-2xl sm:text-3xl font-mono font-light ${isDark ? 'text-[#E0E2E5]' : 'text-gray-900'}`}>
-            {kpis.totalAtivos}
-          </h2>
-          <p className={`text-[10px] mt-1.5 font-mono ${isDark ? 'text-[#8E9299]' : 'text-gray-500'}`}>
-            <span className={isDark ? 'text-green-400' : 'text-emerald-600 font-semibold'}>{kpis.colaboradoresCredores}</span> credores • <span className={isDark ? 'text-red-400' : 'text-red-600 font-semibold'}>{kpis.colaboradoresDevedores}</span> devedores
-          </p>
-        </div>
 
-        {/* KPI 3: Atestados (AT) */}
-        <div className={`p-5 rounded-2xl border shadow-xs transition-all ${
-          isDark 
-            ? 'bg-[#15171C] border-[#1F2229] hover:border-[#2A2E38]' 
-            : 'bg-white border-gray-200 hover:border-gray-300'
-        }`}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-1.5">
-              <p className={`text-xs font-bold uppercase font-mono ${isDark ? 'text-[#8E9299]' : 'text-gray-500'}`}>
-                Atestados (AT)
-              </p>
-              <InfoTooltip 
-                theme={theme}
-                content="Lançamentos de atestados médicos homologados com comprovante arquivado no Google Drive. Justificam o dia sem gerar débito no banco."
-              />
+          {/* KPI 2: Colaboradores Ativos */}
+          <div className={`p-5 rounded-2xl border shadow-xs transition-all ${
+            isDark 
+              ? 'bg-[#15171C] border-[#1F2229] hover:border-[#2A2E38]' 
+              : 'bg-white border-gray-200 hover:border-gray-300'
+          }`}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <p className={`text-xs font-bold uppercase font-mono ${isDark ? 'text-[#8E9299]' : 'text-gray-500'}`}>
+                  Colaboradores
+                </p>
+                <InfoTooltip 
+                  theme={theme}
+                  content="Quantidade de colaboradores com contrato ativo na base. Divididos entre quem possui horas a favor (credores) ou a compensar (devedores)."
+                />
+              </div>
+              <div className={`p-1.5 rounded-lg ${isDark ? 'bg-blue-950/40 text-blue-400' : 'bg-blue-50 text-blue-600'}`}>
+                <Users className="w-4 h-4" />
+              </div>
             </div>
-            <div className={`p-1.5 rounded-lg ${isDark ? 'bg-yellow-950/40 text-yellow-400' : 'bg-amber-50 text-amber-600'}`}>
-              <ArrowUpRight className="w-4 h-4" />
-            </div>
+            <h2 className={`text-2xl sm:text-3xl font-mono font-light ${isDark ? 'text-[#E0E2E5]' : 'text-gray-900'}`}>
+              {kpis.totalAtivos}
+            </h2>
+            <p className={`text-[10px] mt-1.5 font-mono ${isDark ? 'text-[#8E9299]' : 'text-gray-500'}`}>
+              <span className={isDark ? 'text-green-400' : 'text-emerald-600 font-semibold'}>{kpis.colaboradoresCredores}</span> credores • <span className={isDark ? 'text-red-400' : 'text-red-600 font-semibold'}>{kpis.colaboradoresDevedores}</span> devedores
+            </p>
           </div>
-          <h2 className={`text-2xl sm:text-3xl font-mono font-light ${isDark ? 'text-yellow-500' : 'text-amber-600'}`}>
-            {kpis.totalAtestados}
-          </h2>
-          <p className={`text-[10px] mt-1.5 font-mono ${isDark ? 'text-yellow-500/80' : 'text-amber-700'}`}>
-            Sáb {(kpis.totalHe50).toFixed(1)}h • Dom {(kpis.totalHe100).toFixed(1)}h adicionais
-          </p>
-        </div>
 
-        {/* KPI 4: Faltas Injustificadas */}
-        <div className={`p-5 rounded-2xl border shadow-xs transition-all ${
-          isDark 
-            ? 'bg-[#15171C] border-[#1F2229] hover:border-[#2A2E38]' 
-            : 'bg-white border-gray-200 hover:border-gray-300'
-        }`}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-1.5">
-              <p className={`text-xs font-bold uppercase font-mono ${isDark ? 'text-[#8E9299]' : 'text-gray-500'}`}>
-                Faltas ('F' / 'D')
-              </p>
-              <InfoTooltip 
-                theme={theme}
-                content="Ausências sem justificativa legal homologada. Geram débito de 8.0h por ocorrência conforme SPTF Art. 59."
-              />
+          {/* KPI 3: Atestados (AT) */}
+          <div className={`p-5 rounded-2xl border shadow-xs transition-all ${
+            isDark 
+              ? 'bg-[#15171C] border-[#1F2229] hover:border-[#2A2E38]' 
+              : 'bg-white border-gray-200 hover:border-gray-300'
+          }`}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <p className={`text-xs font-bold uppercase font-mono ${isDark ? 'text-[#8E9299]' : 'text-gray-500'}`}>
+                  Atestados (AT)
+                </p>
+                <InfoTooltip 
+                  theme={theme}
+                  content="Lançamentos de atestados médicos homologados com comprovante arquivado no Google Drive. Justificam o dia sem gerar débito no banco."
+                />
+              </div>
+              <div className={`p-1.5 rounded-lg ${isDark ? 'bg-yellow-950/40 text-yellow-400' : 'bg-amber-50 text-amber-600'}`}>
+                <ArrowUpRight className="w-4 h-4" />
+              </div>
             </div>
-            <div className={`p-1.5 rounded-lg ${isDark ? 'bg-red-950/40 text-red-400' : 'bg-red-50 text-red-600'}`}>
-              <AlertOctagon className="w-4 h-4" />
-            </div>
+            <h2 className={`text-2xl sm:text-3xl font-mono font-light ${isDark ? 'text-yellow-500' : 'text-amber-600'}`}>
+              {kpis.totalAtestados}
+            </h2>
+            <p className={`text-[10px] mt-1.5 font-mono ${isDark ? 'text-yellow-500/80' : 'text-amber-700'}`}>
+              Sáb {(kpis.totalHe50).toFixed(1)}h • Dom {(kpis.totalHe100).toFixed(1)}h adicionais
+            </p>
           </div>
-          <h2 className={`text-2xl sm:text-3xl font-mono font-light ${isDark ? 'text-red-500' : 'text-red-600'}`}>
-            {kpis.totalFaltas.toString().padStart(2, '0')}
-          </h2>
-          <p className={`text-[10px] mt-1.5 font-mono ${isDark ? 'text-red-500/80' : 'text-red-700'}`}>
-            Débito total de -{(kpis.totalFaltas * 8).toFixed(1)}h
-          </p>
+
+          {/* KPI 4: Faltas Injustificadas */}
+          <div className={`p-5 rounded-2xl border shadow-xs transition-all ${
+            isDark 
+              ? 'bg-[#15171C] border-[#1F2229] hover:border-[#2A2E38]' 
+              : 'bg-white border-gray-200 hover:border-gray-300'
+          }`}>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <p className={`text-xs font-bold uppercase font-mono ${isDark ? 'text-[#8E9299]' : 'text-gray-500'}`}>
+                  Faltas ('F' / 'D')
+                </p>
+                <InfoTooltip 
+                  theme={theme}
+                  content="Ausências sem justificativa legal homologada. Geram débito de 8.0h por ocorrência conforme SPTF Art. 59."
+                />
+              </div>
+              <div className={`p-1.5 rounded-lg ${isDark ? 'bg-red-950/40 text-red-400' : 'bg-red-50 text-red-600'}`}>
+                <AlertOctagon className="w-4 h-4" />
+              </div>
+            </div>
+            <h2 className={`text-2xl sm:text-3xl font-mono font-light ${isDark ? 'text-red-500' : 'text-red-600'}`}>
+              {kpis.totalFaltas.toString().padStart(2, '0')}
+            </h2>
+            <p className={`text-[10px] mt-1.5 font-mono ${isDark ? 'text-red-500/80' : 'text-red-700'}`}>
+              Débito total de -{(kpis.totalFaltas * 8).toFixed(1)}h
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* DASHBOARD TAB NAVIGATION & CONTENT */}
       <div className={`rounded-2xl border flex flex-col overflow-hidden shadow-sm transition-colors ${
@@ -843,31 +859,35 @@ export const LookerDashboard: React.FC<LookerDashboardProps> = ({
               Visão Calendário
             </button>
 
-            {/* Aba 3: Resumo por Sede */}
-            <button
-              onClick={() => setActiveTab('por_sede')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                activeTab === 'por_sede'
-                  ? isDark ? 'bg-[#1F2229] text-white border border-[#2A2E38] shadow-xs' : 'bg-white text-blue-700 border border-gray-300 shadow-xs'
-                  : isDark ? 'text-[#8E9299] hover:text-[#E0E2E5]' : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              <Building className="w-3.5 h-3.5 text-amber-500" />
-              Resumo por Sede
-            </button>
+            {/* Aba 3: Resumo por Sede - Oculto para Aux de DA */}
+            {!isAuxDA && (
+              <button
+                onClick={() => setActiveTab('por_sede')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                  activeTab === 'por_sede'
+                    ? isDark ? 'bg-[#1F2229] text-white border border-[#2A2E38] shadow-xs' : 'bg-white text-blue-700 border border-gray-300 shadow-xs'
+                    : isDark ? 'text-[#8E9299] hover:text-[#E0E2E5]' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <Building className="w-3.5 h-3.5 text-amber-500" />
+                Resumo por Sede
+              </button>
+            )}
 
-            {/* Aba 4: Lançamentos Individuais */}
-            <button
-              onClick={() => setActiveTab('extrato')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
-                activeTab === 'extrato'
-                  ? isDark ? 'bg-[#1F2229] text-white border border-[#2A2E38] shadow-xs' : 'bg-white text-blue-700 border border-gray-300 shadow-xs'
-                  : isDark ? 'text-[#8E9299] hover:text-[#E0E2E5]' : 'text-gray-600 hover:text-gray-900'
-              }`}
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-500" />
-              Lançamentos Individuais ({filteredRecords.length})
-            </button>
+            {/* Aba 4: Lançamentos Individuais - Oculto para Aux de DA */}
+            {!isAuxDA && (
+              <button
+                onClick={() => setActiveTab('extrato')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                  activeTab === 'extrato'
+                    ? isDark ? 'bg-[#1F2229] text-white border border-[#2A2E38] shadow-xs' : 'bg-white text-blue-700 border border-gray-300 shadow-xs'
+                    : isDark ? 'text-[#8E9299] hover:text-[#E0E2E5]' : 'text-gray-600 hover:text-gray-900'
+                }`}
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-500" />
+                Lançamentos Individuais ({filteredRecords.length})
+              </button>
+            )}
           </div>
 
           <span className={`text-[10px] font-mono ${isDark ? 'text-[#8E9299]' : 'text-gray-500'}`}>
@@ -1201,8 +1221,10 @@ export const LookerDashboard: React.FC<LookerDashboardProps> = ({
                 employees={employees}
                 records={records}
                 onOpenNewEntryModal={onOpenNewEntryModal}
+                onOpenEditEntryModal={onOpenEditEntryModal}
                 onViewEmployeeStatement={onViewEmployeeStatement}
                 onOpenQuickBatchModal={onOpenQuickBatchModal}
+                onDeleteRecord={onDeleteRecord}
                 theme={theme}
               />
             </ErrorBoundary>

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Employee, InsalubrityRecord, ConstructionSite } from '../types';
+import { Employee, InsalubrityRecord, ConstructionSite, AdminRole } from '../types';
 import { 
   FileSpreadsheet, 
   Calendar, 
@@ -15,7 +15,9 @@ import {
   Trash2, 
   Settings2,
   Briefcase,
-  Edit3
+  Edit3,
+  ArrowRightLeft,
+  FileText
 } from 'lucide-react';
 
 interface InsalubritySimpleMatrixViewProps {
@@ -26,8 +28,11 @@ interface InsalubritySimpleMatrixViewProps {
   onDeleteRecord: (id: string) => Promise<void>;
   constructionSites?: ConstructionSite[];
   currentUserEmail?: string;
+  userRole?: AdminRole;
   theme?: 'dark' | 'light';
   onSwitchToCompleteMode?: () => void;
+  onOpenConversionModal?: () => void;
+  onNavigateToReports?: () => void;
 }
 
 const MONTH_NAMES = [
@@ -60,16 +65,25 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
   onDeleteRecord,
   constructionSites = [],
   currentUserEmail = 'coari.comara@gmail.com',
+  userRole = 'SUPER_ADMIN',
   theme = 'dark',
   onSwitchToCompleteMode,
+  onOpenConversionModal,
+  onNavigateToReports,
 }) => {
   const isDark = theme === 'dark';
 
-  // 1. Período Selecionado (Ano, Mês e Quinzena)
+  // 1. Período Selecionado (Ano, Mês, Modo de Janela de Dias e Navegação)
   const now = new Date();
   const [selectedYear, setSelectedYear] = useState<number>(now.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState<number>(now.getMonth()); // 0 = Jan
-  const [selectedQuinzena, setSelectedQuinzena] = useState<'Q1' | 'Q2'>(now.getDate() <= 15 ? 'Q1' : 'Q2');
+  const [periodViewMode, setPeriodViewMode] = useState<'Q1' | 'Q2' | 'FULL' | 'CUSTOM'>(
+    now.getDate() <= 15 ? 'Q1' : 'Q2'
+  );
+  // Dia inicial da visualização (1 a daysInMonth)
+  const [startDayOffset, setStartDayOffset] = useState<number>(now.getDate() <= 15 ? 1 : 16);
+  // Tamanho da janela em dias (padrão 15)
+  const [windowSize, setWindowSize] = useState<number>(15);
 
   // 2. Filtros de visualização
   const [searchQuery, setSearchQuery] = useState('');
@@ -90,10 +104,14 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
     record?: InsalubrityRecord;
   } | null>(null);
 
-  // Estado do Formulário em Lote Quinzenal / Mensal
+  // Estado do Formulário em Lote de Atividades (Modo Simples: Data + Atividade + Busca + Seleção)
   const [batchSelectedEmpIds, setBatchSelectedEmpIds] = useState<string[]>([]);
   const [batchActivity, setBatchActivity] = useState('CONCRETO');
-  const [batchScope, setBatchScope] = useState<'QUINZENA_WEEKDAYS' | 'QUINZENA_ALL' | 'MONTH_WEEKDAYS'>('QUINZENA_WEEKDAYS');
+  const [batchLaunchDate, setBatchLaunchDate] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+  const [batchSearchQuery, setBatchSearchQuery] = useState('');
   const [isSavingBatch, setIsSavingBatch] = useState(false);
 
   // Total de dias no mês selecionado
@@ -120,14 +138,78 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
     return list;
   }, [selectedYear, selectedMonth, daysInMonth]);
 
-  // Dias da Quinzena Ativa (15 dias na 1ª Quinzena, do 16 até o fim na 2ª Quinzena)
-  const currentQuinzenaDays = useMemo(() => {
-    if (selectedQuinzena === 'Q1') {
+  // Dias Visíveis na Matriz com base no modo selecionado ou deslocamento de dias
+  const visibleDays = useMemo(() => {
+    if (periodViewMode === 'Q1') {
       return allMonthDays.filter(d => d.dayNumber >= 1 && d.dayNumber <= 15);
-    } else {
+    }
+    if (periodViewMode === 'Q2') {
       return allMonthDays.filter(d => d.dayNumber >= 16);
     }
-  }, [allMonthDays, selectedQuinzena]);
+    if (periodViewMode === 'FULL') {
+      return allMonthDays;
+    }
+    // Modo CUSTOM (Janela Deslizante)
+    const start = Math.max(1, Math.min(startDayOffset, daysInMonth));
+    const end = Math.min(start + windowSize - 1, daysInMonth);
+    return allMonthDays.filter(d => d.dayNumber >= start && d.dayNumber <= end);
+  }, [allMonthDays, periodViewMode, startDayOffset, windowSize, daysInMonth]);
+
+  // Alias para manter compatibilidade com relatórios e lote
+  const currentQuinzenaDays = visibleDays;
+
+  // Rótulo textual do período selecionado
+  const currentPeriodLabel = useMemo(() => {
+    if (periodViewMode === 'Q1') return '1ª Quinzena (Dias 01 a 15)';
+    if (periodViewMode === 'Q2') return `2ª Quinzena (Dias 16 a ${daysInMonth})`;
+    if (periodViewMode === 'FULL') return `Mês Completo (Dias 01 a ${daysInMonth})`;
+    if (visibleDays.length > 0) {
+      const first = visibleDays[0].dayNumber.toString().padStart(2, '0');
+      const last = visibleDays[visibleDays.length - 1].dayNumber.toString().padStart(2, '0');
+      return `Intervalo Personalizado (Dias ${first} a ${last})`;
+    }
+    return `Dias 01 a ${daysInMonth}`;
+  }, [periodViewMode, daysInMonth, visibleDays]);
+
+  // Deslocar dias para frente ou para trás
+  const handleShiftDays = (delta: number) => {
+    let currentStart = 1;
+    if (periodViewMode === 'Q1') currentStart = 1;
+    else if (periodViewMode === 'Q2') currentStart = 16;
+    else if (periodViewMode === 'FULL') currentStart = 1;
+    else currentStart = startDayOffset;
+
+    let newStart = currentStart + delta;
+
+    if (newStart < 1) {
+      // Se recuar além do dia 1, vai para o dia 1 do mês atual (ou volta o mês se já estava em 1)
+      if (currentStart === 1) {
+        handlePrevMonth();
+        return;
+      }
+      newStart = 1;
+    } else if (newStart > daysInMonth - 4) {
+      // Se avançar além do fim do mês
+      if (currentStart >= daysInMonth - 4) {
+        handleNextMonth();
+        return;
+      }
+      newStart = Math.max(1, daysInMonth - windowSize + 1);
+    }
+
+    setStartDayOffset(newStart);
+    setPeriodViewMode('CUSTOM');
+  };
+
+  const handleSelectQuinzena = (q: 'Q1' | 'Q2') => {
+    setPeriodViewMode(q);
+    setStartDayOffset(q === 'Q1' ? 1 : 16);
+  };
+
+  const handleSelectFullMonth = () => {
+    setPeriodViewMode('FULL');
+    setStartDayOffset(1);
+  };
 
   // Lista de funções disponíveis para o filtro
   const availableCargos = useMemo(() => {
@@ -190,11 +272,13 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
     });
   }, [employees, searchQuery, selectedBranch, selectedCargo, onlyWithRecords, selectedYear, selectedMonth, insalubrityRecords]);
 
-  // Estatísticas da Quinzena e do Mês
+  // Estatísticas do Período Visível e do Mês
   const periodStats = useMemo(() => {
-    let totalApontamentosQuinzena = 0;
+    let totalApontamentosPeriodo = 0;
     let totalApontamentosMes = 0;
-    const colaboradoresComAtividadeQuinzena = new Set<string>();
+    const colaboradoresComAtividadePeriodo = new Set<string>();
+
+    const visibleDatesSet = new Set(visibleDays.map(d => d.formattedDate));
 
     filteredEmployees.forEach(emp => {
       allMonthDays.forEach(d => {
@@ -202,24 +286,23 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
         const rec = recordsMap.get(key);
         if (rec) {
           totalApontamentosMes++;
-          const inQuinzena = selectedQuinzena === 'Q1' ? d.dayNumber <= 15 : d.dayNumber >= 16;
-          if (inQuinzena) {
-            totalApontamentosQuinzena++;
-            colaboradoresComAtividadeQuinzena.add(emp.matricula);
+          if (visibleDatesSet.has(d.formattedDate)) {
+            totalApontamentosPeriodo++;
+            colaboradoresComAtividadePeriodo.add(emp.matricula);
           }
         }
       });
     });
 
-    const diasUteisQuinzena = currentQuinzenaDays.filter(d => !d.isWeekend).length;
+    const diasUteisPeriodo = visibleDays.filter(d => !d.isWeekend).length;
 
     return {
-      totalApontamentosQuinzena,
+      totalApontamentosPeriodo,
       totalApontamentosMes,
-      totalColaboradoresAtivosQuinzena: colaboradoresComAtividadeQuinzena.size,
-      diasUteisQuinzena,
+      totalColaboradoresAtivosPeriodo: colaboradoresComAtividadePeriodo.size,
+      diasUteisPeriodo,
     };
-  }, [filteredEmployees, allMonthDays, currentQuinzenaDays, recordsMap, selectedQuinzena]);
+  }, [filteredEmployees, allMonthDays, visibleDays, recordsMap]);
 
   // Navegação de Mês
   const handlePrevMonth = () => {
@@ -299,7 +382,7 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
           quantidadeHorasDias: 8,
           unidade: 'HORAS',
           responsavelLancamento: 'Encarregado de Campo',
-          observacoes: `Lote dias úteis ${selectedQuinzena === 'Q1' ? '1ª Quinzena' : '2ª Quinzena'} ${MONTH_NAMES[selectedMonth]}/${selectedYear}`,
+          observacoes: `Lote dias úteis ${currentPeriodLabel} ${MONTH_NAMES[selectedMonth]}/${selectedYear}`,
           criadoEm: new Date().toISOString(),
           criadoPorEmail: currentUserEmail,
         });
@@ -307,7 +390,7 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
     });
 
     if (toSave.length === 0) {
-      alert(`Todos os dias úteis desta quinzena já estão apontados para ${emp.nome}.`);
+      alert(`Todos os dias úteis deste período já estão apontados para ${emp.nome}.`);
       return;
     }
 
@@ -320,7 +403,7 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
     }
   };
 
-  // Limpar Todos os Registros da Quinzena para um Colaborador
+  // Limpar Todos os Registros da Quinzena/Período para um Colaborador
   const handleClearQuinzenaForEmployee = async (emp: Employee) => {
     const toDeleteIds: string[] = [];
     currentQuinzenaDays.forEach(d => {
@@ -332,35 +415,26 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
     });
 
     if (toDeleteIds.length === 0) {
-      alert(`Nenhum apontamento encontrado nesta quinzena para ${emp.nome}.`);
+      alert(`Nenhum apontamento encontrado neste período para ${emp.nome}.`);
       return;
     }
 
-    if (window.confirm(`Deseja remover todos os ${toDeleteIds.length} apontamentos da ${selectedQuinzena === 'Q1' ? '1ª Quinzena' : '2ª Quinzena'} de ${emp.nome}?`)) {
+    if (window.confirm(`Deseja remover todos os ${toDeleteIds.length} apontamentos de (${currentPeriodLabel}) de ${emp.nome}?`)) {
       for (const id of toDeleteIds) {
         await onDeleteRecord(id);
       }
     }
   };
 
-  // Executar Lote Multi-Colaborador
+  // Executar Lote Multi-Colaborador (Modo Simples)
   const handleExecuteMultiBatch = async () => {
     if (batchSelectedEmpIds.length === 0) {
       alert('Selecione ao menos um colaborador.');
       return;
     }
 
-    let targetDays: typeof allMonthDays = [];
-    if (batchScope === 'QUINZENA_WEEKDAYS') {
-      targetDays = currentQuinzenaDays.filter(d => !d.isWeekend);
-    } else if (batchScope === 'QUINZENA_ALL') {
-      targetDays = currentQuinzenaDays;
-    } else {
-      targetDays = allMonthDays.filter(d => !d.isWeekend);
-    }
-
-    if (targetDays.length === 0) {
-      alert('Nenhum dia selecionado para o lote.');
+    if (!batchLaunchDate) {
+      alert('Informe a data do lançamento.');
       return;
     }
 
@@ -372,26 +446,24 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
       const emp = employees.find(e => e.matricula === empMat);
       if (!emp) return;
 
-      targetDays.forEach(d => {
-        const key = `${emp.matricula.trim().toUpperCase()}_${d.formattedDate}`;
-        if (!recordsMap.has(key)) {
-          toSave.push({
-            id: `ins-${Date.now()}-${Math.floor(Math.random() * 1000000)}`,
-            matricula: emp.matricula,
-            nomeColaborador: emp.nome,
-            sede: emp.sede_atual || emp.sede || 'KO',
-            funcao: emp.funcao || emp.cargo || 'Operacional',
-            dataEvento: d.formattedDate,
-            atividadeDesempenhada: effectiveActivity,
-            grauExposicao: '20%',
-            quantidadeHorasDias: 8,
-            unidade: 'HORAS',
-            responsavelLancamento: 'Encarregado de Campo',
-            observacoes: `Lote ${effectiveActivity} - ${MONTH_NAMES[selectedMonth]}/${selectedYear}`,
-            criadoEm: new Date().toISOString(),
-            criadoPorEmail: currentUserEmail,
-          });
-        }
+      const key = `${emp.matricula.trim().toUpperCase()}_${batchLaunchDate}`;
+      const existing = recordsMap.get(key);
+
+      toSave.push({
+        id: existing?.id || `ins-${Date.now()}-${Math.floor(Math.random() * 1000000)}`,
+        matricula: emp.matricula,
+        nomeColaborador: emp.nome,
+        sede: emp.sede_atual || emp.sede || 'KO',
+        funcao: emp.funcao || emp.cargo || 'Operacional',
+        dataEvento: batchLaunchDate,
+        atividadeDesempenhada: effectiveActivity,
+        grauExposicao: '20%',
+        quantidadeHorasDias: 8,
+        unidade: 'HORAS',
+        responsavelLancamento: 'Encarregado de Campo',
+        observacoes: `Lançamento ${effectiveActivity} - ${batchLaunchDate}`,
+        criadoEm: existing?.criadoEm || new Date().toISOString(),
+        criadoPorEmail: currentUserEmail,
       });
     });
 
@@ -405,6 +477,7 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
       }
       setIsBatchModalOpen(false);
       setBatchSelectedEmpIds([]);
+      setBatchSearchQuery('');
     } catch (err: any) {
       alert(`Erro ao salvar lote: ${err?.message || 'Falha na gravação'}`);
     } finally {
@@ -414,7 +487,7 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
 
   // Exportar Planilha Oficial Simples COMARA em CSV (Sem Porcentagem)
   const handleExportOfficialSpreadsheetCSV = () => {
-    const quinzenaLabel = selectedQuinzena === 'Q1' ? '1ª QUINZENA (01 A 15)' : `2ª QUINZENA (16 A ${daysInMonth})`;
+    const quinzenaLabel = currentPeriodLabel.toUpperCase();
     const headerRow1 = `COMISSAO DE AEROPORTOS DA REGIAO AMAZONICA - COMARA`;
     const headerRow2 = `CONTROLE DO EFETIVO - MODO SIMPLES - ${MONTH_NAMES[selectedMonth].toUpperCase()}/${selectedYear} - ${quinzenaLabel}`;
     const headerRow3 = `CANTEIRO/SEDE: ${selectedBranch} | GERADO EM: ${new Date().toLocaleDateString('pt-BR')}`;
@@ -443,7 +516,8 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `comara_efetivo_simples_${selectedQuinzena.toLowerCase()}_${MONTH_NAMES[selectedMonth].toLowerCase()}_${selectedYear}_${selectedBranch}.csv`;
+    const periodFileSlug = periodViewMode.toLowerCase();
+    link.download = `comara_efetivo_simples_${periodFileSlug}_${MONTH_NAMES[selectedMonth].toLowerCase()}_${selectedYear}_${selectedBranch}.csv`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -483,6 +557,31 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
 
           {/* Botões de Ação Superior */}
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Botão de Conversão para Perfis Avançados */}
+            {onOpenConversionModal && (userRole === 'SUPER_ADMIN' || userRole === 'GESTOR_RH' || userRole === 'GERENTE_CAMPO' || userRole === 'ROLE_GERENTE') && (
+              <button
+                onClick={onOpenConversionModal}
+                className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-blue-600 hover:from-amber-500 hover:to-blue-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm shadow-blue-600/20 active:scale-98 cursor-pointer"
+                title="Converter e classificar lançamentos do modo simples para enquadramento oficial NR-15 (10%, 20%, 40%)"
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5" />
+                <span>Converter p/ NR-15</span>
+              </button>
+            )}
+
+            {onNavigateToReports && (
+              <button
+                onClick={onNavigateToReports}
+                className={`px-3 py-2 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  isDark ? 'border-[#2A2E38] hover:bg-[#1F2229] text-[#E0E2E5]' : 'border-slate-200 hover:bg-slate-100 text-slate-700'
+                }`}
+                title="Abrir Relatório do Modo Simples e Gerencial"
+              >
+                <FileText className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Relatório Simples</span>
+              </button>
+            )}
+
             {onSwitchToCompleteMode && (
               <button
                 onClick={onSwitchToCompleteMode}
@@ -533,73 +632,138 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
         </div>
 
         {/* ------------------------------------------------------------- */}
-        {/* BARRA DE CONTROLES: NAVEGAÇÃO DE MÊS, QUINZENA & FILTROS      */}
+        {/* BARRA DE CONTROLES: NAVEGAÇÃO DE MÊS, QUINZENA, DIAS & FILTROS*/}
         {/* ------------------------------------------------------------- */}
-        <div className={`mt-5 pt-4 border-t flex flex-col md:flex-row items-center justify-between gap-4 ${
+        <div className={`mt-5 pt-4 border-t flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-4 ${
           isDark ? 'border-[#1F2229]' : 'border-slate-100'
         }`}>
-          {/* Seletor de Mês, Ano e Quinzena */}
+          {/* Seletor de Mês, Ano e Período */}
           <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={handlePrevMonth}
-              className={`p-2 rounded-xl border transition-colors cursor-pointer ${
-                isDark ? 'border-[#1F2229] hover:bg-[#0D0F14] text-gray-300' : 'border-slate-200 hover:bg-slate-100 text-slate-700'
-              }`}
-              title="Mês Anterior"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
+            {/* Navegação de Mês */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={handlePrevMonth}
+                className={`p-2 rounded-xl border transition-colors cursor-pointer ${
+                  isDark ? 'border-[#1F2229] hover:bg-[#0D0F14] text-gray-300' : 'border-slate-200 hover:bg-slate-100 text-slate-700'
+                }`}
+                title="Mês Anterior"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
 
-            <div className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold font-mono flex items-center gap-2 ${
-              isDark ? 'bg-[#0D0F14] border-[#1F2229] text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
-            }`}>
-              <Calendar className="w-4 h-4 text-amber-500" />
-              <span>{MONTH_NAMES[selectedMonth].toUpperCase()} / {selectedYear}</span>
+              <div className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold font-mono flex items-center gap-2 ${
+                isDark ? 'bg-[#0D0F14] border-[#1F2229] text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
+              }`}>
+                <Calendar className="w-4 h-4 text-amber-500" />
+                <span>{MONTH_NAMES[selectedMonth].toUpperCase()} / {selectedYear}</span>
+              </div>
+
+              <button
+                onClick={handleNextMonth}
+                className={`p-2 rounded-xl border transition-colors cursor-pointer ${
+                  isDark ? 'border-[#1F2229] hover:bg-[#0D0F14] text-gray-300' : 'border-slate-200 hover:bg-slate-100 text-slate-700'
+                }`}
+                title="Próximo Mês"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
             </div>
 
-            <button
-              onClick={handleNextMonth}
-              className={`p-2 rounded-xl border transition-colors cursor-pointer ${
-                isDark ? 'border-[#1F2229] hover:bg-[#0D0F14] text-gray-300' : 'border-slate-200 hover:bg-slate-100 text-slate-700'
-              }`}
-              title="Próximo Mês"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-
-            {/* SELETOR DE QUINZENA (15 DIAS) */}
-            <div className={`flex items-center p-1 rounded-xl border ml-2 ${
+            {/* SELETORES DE MODO DE PERÍODO */}
+            <div className={`flex items-center p-1 rounded-xl border ${
               isDark ? 'bg-[#0D0F14] border-[#1F2229]' : 'bg-slate-100 border-slate-200'
             }`}>
               <button
                 type="button"
-                onClick={() => setSelectedQuinzena('Q1')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  selectedQuinzena === 'Q1'
-                    ? 'bg-amber-600 text-white shadow-xs'
+                onClick={() => handleSelectQuinzena('Q1')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  periodViewMode === 'Q1'
+                    ? 'bg-amber-600 text-white shadow-xs font-black'
                     : isDark ? 'text-gray-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                1ª Quinzena (01 a 15)
+                1ª Quinzena (1-15)
               </button>
               <button
                 type="button"
-                onClick={() => setSelectedQuinzena('Q2')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                  selectedQuinzena === 'Q2'
-                    ? 'bg-amber-600 text-white shadow-xs'
+                onClick={() => handleSelectQuinzena('Q2')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  periodViewMode === 'Q2'
+                    ? 'bg-amber-600 text-white shadow-xs font-black'
                     : isDark ? 'text-gray-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                2ª Quinzena (16 a {daysInMonth})
+                2ª Quinzena (16-{daysInMonth})
+              </button>
+              <button
+                type="button"
+                onClick={handleSelectFullMonth}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  periodViewMode === 'FULL'
+                    ? 'bg-amber-600 text-white shadow-xs font-black'
+                    : isDark ? 'text-gray-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Mês Completo (1-{daysInMonth})
+              </button>
+            </div>
+
+            {/* CONTROLES DE MOVIMENTAÇÃO DE DIAS (DESLIZAR / AVANÇAR / VOLTAR) */}
+            <div className={`flex items-center gap-1 p-1 rounded-xl border ${
+              isDark ? 'bg-[#0D0F14] border-[#1F2229]' : 'bg-slate-100 border-slate-200'
+            }`}>
+              <button
+                type="button"
+                onClick={() => handleShiftDays(-5)}
+                className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                  isDark ? 'hover:bg-[#1A1D24] text-gray-300' : 'hover:bg-slate-200 text-slate-700'
+                }`}
+                title="Voltar 5 dias"
+              >
+                ◀◀ -5d
+              </button>
+              <button
+                type="button"
+                onClick={() => handleShiftDays(-1)}
+                className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                  isDark ? 'hover:bg-[#1A1D24] text-gray-300' : 'hover:bg-slate-200 text-slate-700'
+                }`}
+                title="Voltar 1 dia"
+              >
+                ◀ -1d
+              </button>
+
+              <div className="px-2 text-[10px] font-mono font-bold text-amber-500 whitespace-nowrap">
+                {visibleDays.length > 0 ? `Dias ${visibleDays[0].dayNumber} - ${visibleDays[visibleDays.length - 1].dayNumber}` : ''}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleShiftDays(1)}
+                className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                  isDark ? 'hover:bg-[#1A1D24] text-gray-300' : 'hover:bg-slate-200 text-slate-700'
+                }`}
+                title="Avançar 1 dia"
+              >
+                +1d ▶
+              </button>
+              <button
+                type="button"
+                onClick={() => handleShiftDays(5)}
+                className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                  isDark ? 'hover:bg-[#1A1D24] text-gray-300' : 'hover:bg-slate-200 text-slate-700'
+                }`}
+                title="Avançar 5 dias"
+              >
+                +5d ▶▶
               </button>
             </div>
           </div>
 
           {/* Filtros da Matriz */}
-          <div className="flex items-center gap-2.5 flex-wrap w-full md:w-auto">
+          <div className="flex items-center gap-2.5 flex-wrap w-full xl:w-auto">
             {/* Busca Colaborador */}
-            <div className="relative flex-1 md:w-52">
+            <div className="relative flex-1 md:w-48">
               <Search className={`w-3.5 h-3.5 absolute left-3 top-2.5 ${isDark ? 'text-gray-500' : 'text-slate-400'}`} />
               <input
                 type="text"
@@ -726,7 +890,7 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
       </div>
 
       {/* ------------------------------------------------------------- */}
-      {/* 2. CARDS RESUMO DA QUINZENA                                   */}
+      {/* 2. CARDS RESUMO DO PERÍODO SELECIONADO                        */}
       {/* ------------------------------------------------------------- */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className={`p-4 rounded-2xl border ${
@@ -749,14 +913,14 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
           isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200'
         }`}>
           <span className={`text-[10px] uppercase font-bold tracking-wider ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
-            Dias Úteis na Quinzena
+            Dias Úteis no Período
           </span>
           <div className="flex items-baseline gap-2 mt-1">
             <span className={`text-xl font-bold text-amber-500`}>
-              {periodStats.diasUteisQuinzena}
+              {periodStats.diasUteisPeriodo}
             </span>
             <span className={`text-xs ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
-              de {currentQuinzenaDays.length} dias
+              de {visibleDays.length} dias
             </span>
           </div>
         </div>
@@ -765,11 +929,11 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
           isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200'
         }`}>
           <span className={`text-[10px] uppercase font-bold tracking-wider ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
-            Dias Trabalhados (Quinzena)
+            Dias Trabalhados (Período)
           </span>
           <div className="flex items-baseline gap-2 mt-1">
             <span className={`text-xl font-bold text-emerald-500`}>
-              {periodStats.totalApontamentosQuinzena}
+              {periodStats.totalApontamentosPeriodo}
             </span>
             <span className={`text-xs ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
               apontamentos
@@ -785,7 +949,7 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
           </span>
           <div className="flex items-baseline gap-2 mt-1">
             <span className={`text-xl font-bold text-blue-400`}>
-              {periodStats.totalColaboradoresAtivosQuinzena}
+              {periodStats.totalColaboradoresAtivosPeriodo}
             </span>
             <span className={`text-xs ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
               de {filteredEmployees.length}
@@ -795,45 +959,72 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
       </div>
 
       {/* ------------------------------------------------------------- */}
-      {/* 3. MATRIZ DE EFETIVO QUINZENAL (15 DIAS POR VEZ)              */}
+      {/* 3. MATRIZ DE EFETIVO COM NAVEGAÇÃO DE DIAS & TOTAL FIXO       */}
       {/* ------------------------------------------------------------- */}
       <div className={`rounded-2xl border shadow-xs overflow-hidden ${
         isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200'
       }`}>
-        <div className="p-4 border-b flex items-center justify-between gap-2 flex-wrap">
-          <div className="flex items-center gap-2 text-xs font-bold">
+        <div className="p-4 border-b flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2.5 text-xs font-bold">
             <Layers className="w-4 h-4 text-amber-500" />
             <span className={isDark ? 'text-white' : 'text-slate-900'}>
-              Grade de Serviços: {selectedQuinzena === 'Q1' ? '1ª Quinzena (Dias 01 a 15)' : `2ª Quinzena (Dias 16 a ${daysInMonth})`} — {MONTH_NAMES[selectedMonth]} / {selectedYear}
+              Grade de Serviços: {currentPeriodLabel} — {MONTH_NAMES[selectedMonth]} / {selectedYear}
             </span>
           </div>
 
-          <div className="flex items-center gap-2 text-[11px]">
-            <span className={`italic ${isDark ? 'text-[#8E9299]' : 'text-slate-400'}`}>
-              * Clique na célula para marcar com <strong>{activeActivity}</strong> ou editar
+          {/* Atalhos Rápidos para Movimentar Dias */}
+          <div className="flex items-center gap-2 text-[11px] flex-wrap">
+            <div className="flex items-center gap-1 bg-black/10 dark:bg-white/5 p-1 rounded-xl">
+              <button
+                type="button"
+                onClick={() => handleShiftDays(-1)}
+                className={`px-2 py-1 rounded-lg font-bold flex items-center gap-1 border transition-colors cursor-pointer text-xs ${
+                  isDark ? 'border-[#2A2E38] hover:bg-[#1F2229] text-gray-200' : 'border-slate-300 hover:bg-slate-100 text-slate-700 bg-white'
+                }`}
+                title="Voltar 1 dia (Deslizar grade para esquerda)"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+                <span>Voltar Dia</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleShiftDays(1)}
+                className={`px-2 py-1 rounded-lg font-bold flex items-center gap-1 border transition-colors cursor-pointer text-xs ${
+                  isDark ? 'border-[#2A2E38] hover:bg-[#1F2229] text-gray-200' : 'border-slate-300 hover:bg-slate-100 text-slate-700 bg-white'
+                }`}
+                title="Avançar 1 dia (Deslizar grade para direita)"
+              >
+                <span>Avançar Dia</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <span className={`italic hidden sm:inline ${isDark ? 'text-[#8E9299]' : 'text-slate-400'}`}>
+              * Clique na célula para apontar <strong>{activeActivity}</strong> ou editar
             </span>
           </div>
         </div>
 
-        <div className="overflow-x-auto max-h-[620px]">
+        <div className="overflow-x-auto max-h-[620px] relative">
           <table className="w-full text-[11px] border-collapse text-left">
-            <thead className={`sticky top-0 z-20 ${
+            <thead className={`sticky top-0 z-30 ${
               isDark ? 'bg-[#1F2229] text-[#E0E2E5]' : 'bg-slate-100 text-slate-800'
             }`}>
               <tr>
-                {/* Colunas Fixas de Identificação */}
-                <th className="py-2.5 px-3 font-mono font-bold w-10 text-center border-r border-b border-black/10 dark:border-white/10 sticky left-0 z-30 bg-inherit">
+                {/* Colunas Fixas de Identificação (Esquerda) */}
+                <th className="py-2.5 px-3 font-mono font-bold w-10 min-w-[40px] text-center border-r border-b border-black/10 dark:border-white/10 sticky left-0 z-40 bg-[#1F2229] dark:bg-[#1F2229] light:bg-slate-100">
                   Nº
                 </th>
-                <th className="py-2.5 px-3 font-bold min-w-[210px] max-w-[260px] border-r border-b border-black/10 dark:border-white/10 sticky left-10 z-30 bg-inherit">
+                <th className="py-2.5 px-3 font-bold min-w-[210px] max-w-[260px] border-r border-b border-black/10 dark:border-white/10 sticky left-10 z-40 bg-[#1F2229] dark:bg-[#1F2229] light:bg-slate-100">
                   COLABORADOR / MATRÍCULA
                 </th>
                 <th className="py-2.5 px-3 font-bold min-w-[140px] border-r border-b border-black/10 dark:border-white/10">
                   FUNÇÃO / CARGO
                 </th>
 
-                {/* Colunas dos 15 Dias da Quinzena */}
-                {currentQuinzenaDays.map(d => (
+                {/* Colunas dos Dias Selecionados (Centro - que deslizam livremente) */}
+                {visibleDays.map(d => (
                   <th
                     key={d.dayNumber}
                     className={`py-2 px-1 font-mono text-center font-bold min-w-[46px] border-r border-b border-black/10 dark:border-white/10 ${
@@ -848,11 +1039,15 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
                   </th>
                 ))}
 
-                {/* Colunas Finais: Total de Dias Trabalhados e Ações Rápidas */}
-                <th className="py-2.5 px-3 font-bold text-center min-w-[120px] border-r border-b border-black/10 dark:border-white/10">
-                  TOTAL DIAS TRABALHADOS
+                {/* Colunas Finais: Total de Dias Trabalhados e Ações Rápidas (STICKY FIXO À DIREITA) */}
+                <th className={`py-2.5 px-3 font-bold text-center w-[130px] min-w-[130px] border-l-2 border-r border-b border-amber-500/40 sticky right-[110px] z-40 ${
+                  isDark ? 'bg-[#1F2229] text-white shadow-[-6px_0_12px_rgba(0,0,0,0.35)]' : 'bg-slate-100 text-slate-900 shadow-[-6px_0_12px_rgba(0,0,0,0.08)]'
+                }`}>
+                  TOTAL DIAS
                 </th>
-                <th className="py-2.5 px-3 font-bold text-center min-w-[110px] border-b border-black/10 dark:border-white/10">
+                <th className={`py-2.5 px-3 font-bold text-center w-[110px] min-w-[110px] border-b border-black/10 dark:border-white/10 sticky right-0 z-40 ${
+                  isDark ? 'bg-[#1F2229] text-[#E0E2E5]' : 'bg-slate-100 text-slate-800'
+                }`}>
                   AÇÕES RÁPIDAS
                 </th>
               </tr>
@@ -863,31 +1058,40 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
             }`}>
               {filteredEmployees.length === 0 ? (
                 <tr>
-                  <td colSpan={currentQuinzenaDays.length + 5} className="py-12 text-center text-xs text-gray-500 font-sans">
+                  <td colSpan={visibleDays.length + 5} className="py-12 text-center text-xs text-gray-500 font-sans">
                     Nenhum colaborador encontrado com os filtros selecionados.
                   </td>
                 </tr>
               ) : (
                 filteredEmployees.map((emp, index) => {
-                  let employeeQuinzenaDaysCount = 0;
+                  let employeeVisibleDaysCount = 0;
+                  let employeeMonthDaysCount = 0;
+
+                  // Calcula contagem do período visível e do mês inteiro
+                  allMonthDays.forEach(d => {
+                    const key = `${emp.matricula.trim().toUpperCase()}_${d.formattedDate}`;
+                    if (recordsMap.has(key)) {
+                      employeeMonthDaysCount++;
+                    }
+                  });
 
                   return (
                     <tr
                       key={emp.id || emp.matricula}
-                      className={`transition-colors ${
+                      className={`transition-colors group ${
                         isDark ? 'hover:bg-[#1A1D24]' : 'hover:bg-slate-50'
                       }`}
                     >
                       {/* 1. Nº Sequencial */}
-                      <td className={`py-2 px-2 text-center text-[10px] font-bold border-r border-black/5 dark:border-white/5 sticky left-0 z-10 ${
-                        isDark ? 'bg-[#15171C]' : 'bg-white'
+                      <td className={`py-2 px-2 text-center text-[10px] font-bold border-r border-black/5 dark:border-white/5 sticky left-0 z-20 ${
+                        isDark ? 'bg-[#15171C] group-hover:bg-[#1A1D24]' : 'bg-white group-hover:bg-slate-50'
                       }`}>
                         {index + 1}
                       </td>
 
                       {/* 2. Nome e Matrícula */}
-                      <td className={`py-2 px-3 border-r border-black/5 dark:border-white/5 sticky left-10 z-10 ${
-                        isDark ? 'bg-[#15171C]' : 'bg-white'
+                      <td className={`py-2 px-3 border-r border-black/5 dark:border-white/5 sticky left-10 z-20 ${
+                        isDark ? 'bg-[#15171C] group-hover:bg-[#1A1D24]' : 'bg-white group-hover:bg-slate-50'
                       }`}>
                         <div className="font-sans font-bold truncate max-w-[240px] text-xs" title={emp.nome}>
                           {emp.nome}
@@ -904,13 +1108,13 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
                         {emp.funcao || emp.cargo || 'Operacional'}
                       </td>
 
-                      {/* 4. Células dos 15 Dias da Quinzena */}
-                      {currentQuinzenaDays.map(d => {
+                      {/* 4. Células dos Dias Selecionados */}
+                      {visibleDays.map(d => {
                         const key = `${emp.matricula.trim().toUpperCase()}_${d.formattedDate}`;
                         const record = recordsMap.get(key);
 
                         if (record) {
-                          employeeQuinzenaDaysCount++;
+                          employeeVisibleDaysCount++;
                         }
 
                         const activityText = record?.atividadeDesempenhada || '';
@@ -945,19 +1149,32 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
                         );
                       })}
 
-                      {/* 5. Total de Dias Trabalhados */}
-                      <td className="py-2 px-3 text-center font-bold text-xs border-r border-black/5 dark:border-white/5">
-                        <span className={`px-2.5 py-1 rounded-full text-xs ${
-                          employeeQuinzenaDaysCount > 0 
-                            ? 'bg-emerald-500/20 text-emerald-400 font-black' 
-                            : isDark ? 'text-gray-500' : 'text-slate-400'
-                        }`}>
-                          {employeeQuinzenaDaysCount} {employeeQuinzenaDaysCount === 1 ? 'dia' : 'dias'}
-                        </span>
+                      {/* 5. Total de Dias Trabalhados (FIXO À DIREITA / STICKY) */}
+                      <td className={`py-2 px-2 text-center font-bold text-xs border-l-2 border-r border-amber-500/40 sticky right-[110px] z-20 w-[130px] min-w-[130px] ${
+                        isDark 
+                          ? 'bg-[#15171C] group-hover:bg-[#1A1D24] shadow-[-6px_0_12px_rgba(0,0,0,0.35)]' 
+                          : 'bg-white group-hover:bg-slate-50 shadow-[-6px_0_12px_rgba(0,0,0,0.08)]'
+                      }`}>
+                        <div className="flex flex-col items-center justify-center gap-0.5">
+                          <span className={`px-2.5 py-0.5 rounded-full text-xs font-black ${
+                            employeeVisibleDaysCount > 0 
+                              ? 'bg-emerald-500/20 text-emerald-400' 
+                              : isDark ? 'text-gray-500' : 'text-slate-400'
+                          }`}>
+                            {employeeVisibleDaysCount} {employeeVisibleDaysCount === 1 ? 'dia' : 'dias'}
+                          </span>
+                          {periodViewMode !== 'FULL' && (
+                            <span className={`text-[9px] font-mono ${isDark ? 'text-gray-400' : 'text-slate-500'}`}>
+                              Mês: <strong>{employeeMonthDaysCount}d</strong>
+                            </span>
+                          )}
+                        </div>
                       </td>
 
-                      {/* 6. Ações Rápidas por Linha */}
-                      <td className="py-1 px-2 text-center">
+                      {/* 6. Ações Rápidas por Linha (FIXO À DIREITA / STICKY) */}
+                      <td className={`py-1 px-2 text-center sticky right-0 z-20 w-[110px] min-w-[110px] border-b border-black/5 dark:border-white/5 ${
+                        isDark ? 'bg-[#15171C] group-hover:bg-[#1A1D24]' : 'bg-white group-hover:bg-slate-50'
+                      }`}>
                         <div className="flex items-center justify-center gap-1 font-sans">
                           <button
                             onClick={() => handleFillWeekdaysForEmployee(emp)}
@@ -966,12 +1183,12 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
                                 ? 'bg-blue-950/40 text-blue-300 border-blue-800/50 hover:bg-blue-900/60' 
                                 : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'
                             }`}
-                            title="Preencher todos os dias úteis desta quinzena"
+                            title="Preencher todos os dias úteis deste período"
                           >
                             + Úteis
                           </button>
 
-                          {employeeQuinzenaDaysCount > 0 && (
+                          {employeeMonthDaysCount > 0 && (
                             <button
                               onClick={() => handleClearQuinzenaForEmployee(emp)}
                               className={`p-1 rounded-lg text-[10px] border transition-colors cursor-pointer ${
@@ -979,7 +1196,7 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
                                 ? 'text-red-400 border-red-900/40 hover:bg-red-950/40' 
                                 : 'text-red-600 border-red-200 hover:bg-red-50'
                               }`}
-                              title="Limpar todos os apontamentos desta quinzena"
+                              title="Limpar apontamentos deste período"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </button>
@@ -1109,64 +1326,27 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
             </div>
 
             <div className="space-y-4 text-xs">
-              {/* Informações de Período */}
-              <div className={`p-3 rounded-xl border flex items-center justify-between font-mono ${
-                isDark ? 'bg-[#0D0F14] border-[#1F2229]' : 'bg-slate-50 border-slate-200'
-              }`}>
-                <span>Período Ativo:</span>
-                <span className="font-bold text-amber-500">
-                  {selectedQuinzena === 'Q1' ? '1ª Quinzena (01 a 15)' : `2ª Quinzena (16 a ${daysInMonth})`} de {MONTH_NAMES[selectedMonth]} / {selectedYear}
-                </span>
-              </div>
-
-              {/* Escopo de Aplicação */}
+              {/* 1. Data do Lançamento */}
               <div>
                 <label className="block font-bold mb-1.5 uppercase text-[10px] text-gray-400">
-                  1. Dias a serem preenchidos:
+                  1. Data do Lançamento:
                 </label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setBatchScope('QUINZENA_WEEKDAYS')}
-                    className={`p-2.5 rounded-xl border text-left font-medium transition-all ${
-                      batchScope === 'QUINZENA_WEEKDAYS'
-                        ? 'bg-amber-500/15 text-amber-400 border-amber-500/40 font-bold'
-                        : isDark ? 'border-[#1F2229] text-gray-400' : 'border-slate-200 text-slate-600'
+                <div className="flex items-center gap-3">
+                  <input
+                    type="date"
+                    value={batchLaunchDate}
+                    onChange={(e) => setBatchLaunchDate(e.target.value)}
+                    className={`px-3 py-2 rounded-xl border text-xs font-mono font-bold outline-none cursor-pointer ${
+                      isDark ? 'bg-[#0D0F14] border-[#1F2229] text-white focus:border-amber-500' : 'bg-slate-50 border-slate-300 text-slate-900 focus:border-amber-600'
                     }`}
-                  >
-                    <div>Dias Úteis da Quinzena</div>
-                    <div className="text-[10px] text-gray-400 font-normal">Segunda a Sexta-feira</div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setBatchScope('QUINZENA_ALL')}
-                    className={`p-2.5 rounded-xl border text-left font-medium transition-all ${
-                      batchScope === 'QUINZENA_ALL'
-                        ? 'bg-amber-500/15 text-amber-400 border-amber-500/40 font-bold'
-                        : isDark ? 'border-[#1F2229] text-gray-400' : 'border-slate-200 text-slate-600'
-                    }`}
-                  >
-                    <div>Todos os Dias da Quinzena</div>
-                    <div className="text-[10px] text-gray-400 font-normal">Inclui Sábados e Domingos</div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setBatchScope('MONTH_WEEKDAYS')}
-                    className={`p-2.5 rounded-xl border text-left font-medium transition-all ${
-                      batchScope === 'MONTH_WEEKDAYS'
-                        ? 'bg-amber-500/15 text-amber-400 border-amber-500/40 font-bold'
-                        : isDark ? 'border-[#1F2229] text-gray-400' : 'border-slate-200 text-slate-600'
-                    }`}
-                  >
-                    <div>Mês Inteiro (Dias Úteis)</div>
-                    <div className="text-[10px] text-gray-400 font-normal">Todas as quinzenas</div>
-                  </button>
+                  />
+                  <span className={`text-[11px] font-medium ${isDark ? 'text-gray-400' : 'text-slate-500'}`}>
+                    {batchLaunchDate ? new Date(batchLaunchDate + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' }) : ''}
+                  </span>
                 </div>
               </div>
 
-              {/* Serviço / Atividade */}
+              {/* 2. Serviço / Atividade */}
               <div>
                 <label className="block font-bold mb-1.5 uppercase text-[10px] text-gray-400">
                   2. Serviço / Atividade a ser atribuída:
@@ -1198,7 +1378,7 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
                 />
               </div>
 
-              {/* Seleção de Colaboradores */}
+              {/* 3. Seleção de Colaboradores com Busca Rápida */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="font-bold uppercase text-[10px] text-gray-400">
@@ -1207,44 +1387,77 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => setBatchSelectedEmpIds(filteredEmployees.map(e => e.matricula))}
-                      className="text-[11px] text-blue-400 hover:underline cursor-pointer"
+                      onClick={() => {
+                        const targetList = filteredEmployees.filter(e => {
+                          const q = batchSearchQuery.trim().toLowerCase();
+                          if (!q) return true;
+                          return e.nome.toLowerCase().includes(q) || e.matricula.toLowerCase().includes(q);
+                        });
+                        const idsToAdd = targetList.map(e => e.matricula);
+                        setBatchSelectedEmpIds(Array.from(new Set([...batchSelectedEmpIds, ...idsToAdd])));
+                      }}
+                      className="text-[11px] text-blue-400 hover:underline cursor-pointer font-bold"
                     >
-                      Selecionar Todos ({filteredEmployees.length})
+                      Marcar Filtrados ({filteredEmployees.filter(e => {
+                        const q = batchSearchQuery.trim().toLowerCase();
+                        if (!q) return true;
+                        return e.nome.toLowerCase().includes(q) || e.matricula.toLowerCase().includes(q);
+                      }).length})
                     </button>
                     <span>•</span>
                     <button
                       type="button"
                       onClick={() => setBatchSelectedEmpIds([])}
-                      className="text-[11px] text-red-400 hover:underline cursor-pointer"
+                      className="text-[11px] text-red-400 hover:underline cursor-pointer font-bold"
                     >
-                      Limpar
+                      Desmarcar Todos
                     </button>
                   </div>
                 </div>
 
-                <div className={`max-h-40 overflow-y-auto p-2 rounded-xl border divide-y ${
+                {/* Campo de Busca Rápida no Modal */}
+                <div className="relative mb-2">
+                  <input
+                    type="text"
+                    value={batchSearchQuery}
+                    onChange={(e) => setBatchSearchQuery(e.target.value)}
+                    placeholder="🔍 Buscar por nome ou matrícula..."
+                    className={`w-full px-3 py-1.5 rounded-lg border text-xs outline-none ${
+                      isDark 
+                        ? 'bg-[#0D0F14] border-[#1F2229] text-white placeholder-gray-500 focus:border-amber-500' 
+                        : 'bg-white border-slate-300 text-slate-900 placeholder-slate-400 focus:border-amber-600'
+                    }`}
+                  />
+                </div>
+
+                <div className={`max-h-48 overflow-y-auto p-2 rounded-xl border divide-y ${
                   isDark ? 'bg-[#0D0F14] border-[#1F2229] divide-[#1F2229]' : 'bg-slate-50 border-slate-200 divide-slate-200'
                 }`}>
-                  {filteredEmployees.map(emp => (
-                    <label key={emp.matricula} className="flex items-center gap-2 py-1 px-1 cursor-pointer hover:bg-black/10 dark:hover:bg-white/5 rounded">
-                      <input
-                        type="checkbox"
-                        checked={batchSelectedEmpIds.includes(emp.matricula)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setBatchSelectedEmpIds([...batchSelectedEmpIds, emp.matricula]);
-                          } else {
-                            setBatchSelectedEmpIds(batchSelectedEmpIds.filter(m => m !== emp.matricula));
-                          }
-                        }}
-                        className="rounded text-amber-500 focus:ring-0"
-                      />
-                      <span className="font-mono text-[11px]">{emp.matricula}</span>
-                      <span className="font-sans font-bold text-xs truncate max-w-xs">{emp.nome}</span>
-                      <span className="text-gray-400 text-[10px]">({emp.funcao || emp.cargo})</span>
-                    </label>
-                  ))}
+                  {filteredEmployees
+                    .filter(emp => {
+                      const q = batchSearchQuery.trim().toLowerCase();
+                      if (!q) return true;
+                      return emp.nome.toLowerCase().includes(q) || emp.matricula.toLowerCase().includes(q);
+                    })
+                    .map(emp => (
+                      <label key={emp.matricula} className="flex items-center gap-2 py-1 px-1 cursor-pointer hover:bg-black/10 dark:hover:bg-white/5 rounded">
+                        <input
+                          type="checkbox"
+                          checked={batchSelectedEmpIds.includes(emp.matricula)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setBatchSelectedEmpIds([...batchSelectedEmpIds, emp.matricula]);
+                            } else {
+                              setBatchSelectedEmpIds(batchSelectedEmpIds.filter(m => m !== emp.matricula));
+                            }
+                          }}
+                          className="rounded text-amber-500 focus:ring-0 cursor-pointer"
+                        />
+                        <span className="font-mono text-[11px] text-amber-400 font-bold">{emp.matricula}</span>
+                        <span className="font-sans font-bold text-xs truncate max-w-xs">{emp.nome}</span>
+                        <span className="text-gray-400 text-[10px]">({emp.funcao || emp.cargo})</span>
+                      </label>
+                    ))}
                 </div>
               </div>
             </div>
@@ -1311,7 +1524,7 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
                   COMISSÃO DE AEROPORTOS DA REGIÃO AMAZÔNICA — COMARA
                 </div>
                 <div className="text-xs font-bold text-gray-800 uppercase">
-                  PLANILHA DE EFETIVO EM CAMPO — {selectedQuinzena === 'Q1' ? '1ª QUINZENA (01 A 15)' : `2ª QUINZENA (16 A ${daysInMonth})`}
+                  PLANILHA DE EFETIVO EM CAMPO — {currentPeriodLabel.toUpperCase()}
                 </div>
                 <div className="text-[11px] font-mono text-gray-600 flex items-center justify-center gap-4 pt-1">
                   <span>MÊS/ANO: <strong>{MONTH_NAMES[selectedMonth].toUpperCase()} / {selectedYear}</strong></span>

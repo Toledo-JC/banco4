@@ -4,6 +4,7 @@ import { storageService } from '../services/storageService';
 import { firestoreService } from '../services/firestoreService';
 import { hashPassword } from '../services/authService';
 import { auth } from '../services/firebase';
+import { InfoTooltip } from './InfoTooltip';
 import { 
   ShieldCheck, 
   UserPlus, 
@@ -97,6 +98,12 @@ export const AdminPermissionsManagement: React.FC<AdminPermissionsManagementProp
     setConfirmarSenha('');
     setErrorMsg(null);
     setIsModalOpen(true);
+  };
+
+  const handleGenerateAdminRandomPassword = () => {
+    const pin = Math.floor(100000 + Math.random() * 900000).toString();
+    setSenhaInicial(pin);
+    setConfirmarSenha(pin);
   };
 
   const handleOpenEditModal = (adm: AdminUser) => {
@@ -552,9 +559,15 @@ export const AdminPermissionsManagement: React.FC<AdminPermissionsManagementProp
                 </div>
 
                 <div>
-                  <label className={`block font-semibold text-xs mb-1 ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
-                    Nível de Acesso (Role)
-                  </label>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <label className={`block font-semibold text-xs ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
+                      Nível de Acesso (Role)
+                    </label>
+                    <InfoTooltip 
+                      theme={theme}
+                      content="Perfis RBAC: AUX_DA (Auxiliar da DA), GESTOR_RH (Gestão Completa de Banco de Horas), CHEFE_CANTEIRO (Consulta Mobile de Canteiro), GERENTE_CAMPO (Visualização Geral), SUPER_ADMIN (Acesso Total com Gestão de Usuários), AUDITOR (Relatórios)."
+                    />
+                  </div>
                   <select
                     value={nivelAcesso}
                     onChange={(e) => setNivelAcesso(e.target.value as any)}
@@ -575,41 +588,68 @@ export const AdminPermissionsManagement: React.FC<AdminPermissionsManagementProp
               </div>
 
               {/* Senha Inicial e Confirmação */}
-              <div className="grid grid-cols-2 gap-3 pt-1">
-                <div>
-                  <label className={`block font-semibold text-xs mb-1 ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
-                    {editingAdmin ? 'Nova Senha (opcional)' : 'Senha Inicial (mín. 6 dígitos) *'}
-                  </label>
-                  <input
-                    type="password"
-                    value={senhaInicial}
-                    onChange={(e) => setSenhaInicial(e.target.value)}
-                    placeholder="••••••••"
-                    required={!editingAdmin}
-                    className={`w-full px-3 py-2 rounded-lg text-xs border focus:outline-hidden font-mono ${
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`font-semibold text-xs ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
+                      {editingAdmin ? 'Credenciais de Acesso' : 'Definição de Senha Inicial'}
+                    </span>
+                    <InfoTooltip 
+                      theme={theme}
+                      content="O usuário poderá fazer login usando o e-mail cadastrado + esta senha, ou autenticar-se via Google Account vinculada."
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleGenerateAdminRandomPassword}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold rounded-md border transition-all active:scale-95 cursor-pointer ${
                       isDark 
-                        ? 'bg-[#0D0F14] border-[#1F2229] text-[#E0E2E5] focus:border-blue-500' 
-                        : 'bg-white border-slate-300 text-slate-900 focus:border-blue-500'
+                        ? 'bg-blue-950/40 text-blue-300 border-blue-800/60 hover:bg-blue-900/50' 
+                        : 'bg-blue-50 text-blue-700 border-blue-300 hover:bg-blue-100'
                     }`}
-                  />
+                    title="Gerar senha aleatória de 6 dígitos"
+                  >
+                    <Sparkles className="w-2.5 h-2.5 text-blue-400" />
+                    <span>Gerar 6 Dígitos</span>
+                  </button>
                 </div>
 
-                <div>
-                  <label className={`block font-semibold text-xs mb-1 ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
-                    {editingAdmin ? 'Confirmar Nova Senha' : 'Confirmar Senha *'}
-                  </label>
-                  <input
-                    type="password"
-                    value={confirmarSenha}
-                    onChange={(e) => setConfirmarSenha(e.target.value)}
-                    placeholder="••••••••"
-                    required={!editingAdmin && Boolean(senhaInicial)}
-                    className={`w-full px-3 py-2 rounded-lg text-xs border focus:outline-hidden font-mono ${
-                      isDark 
-                        ? 'bg-[#0D0F14] border-[#1F2229] text-[#E0E2E5] focus:border-blue-500' 
-                        : 'bg-white border-slate-300 text-slate-900 focus:border-blue-500'
-                    }`}
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className={`block text-[11px] mb-1 ${isDark ? 'text-[#8E9299]' : 'text-slate-600'}`}>
+                      {editingAdmin ? 'Nova Senha (opcional)' : 'Senha (mín. 6 dígitos) *'}
+                    </label>
+                    <input
+                      type="password"
+                      value={senhaInicial}
+                      onChange={(e) => setSenhaInicial(e.target.value)}
+                      placeholder="••••••••"
+                      required={!editingAdmin}
+                      className={`w-full px-3 py-2 rounded-lg text-xs border focus:outline-hidden font-mono ${
+                        isDark 
+                          ? 'bg-[#0D0F14] border-[#1F2229] text-[#E0E2E5] focus:border-blue-500' 
+                          : 'bg-white border-slate-300 text-slate-900 focus:border-blue-500'
+                      }`}
+                    />
+                  </div>
+
+                  <div>
+                    <label className={`block text-[11px] mb-1 ${isDark ? 'text-[#8E9299]' : 'text-slate-600'}`}>
+                      {editingAdmin ? 'Confirmar Nova Senha' : 'Confirmar Senha *'}
+                    </label>
+                    <input
+                      type="password"
+                      value={confirmarSenha}
+                      onChange={(e) => setConfirmarSenha(e.target.value)}
+                      placeholder="••••••••"
+                      required={!editingAdmin && Boolean(senhaInicial)}
+                      className={`w-full px-3 py-2 rounded-lg text-xs border focus:outline-hidden font-mono ${
+                        isDark 
+                          ? 'bg-[#0D0F14] border-[#1F2229] text-[#E0E2E5] focus:border-blue-500' 
+                          : 'bg-white border-slate-300 text-slate-900 focus:border-blue-500'
+                      }`}
+                    />
+                  </div>
                 </div>
               </div>
 

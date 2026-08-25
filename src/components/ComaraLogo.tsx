@@ -11,7 +11,7 @@ interface ComaraLogoProps {
 }
 
 export const ComaraLogo: React.FC<ComaraLogoProps> = ({
-  logoUrl,
+  logoUrl = '/logo.png',
   size = 'md',
   showText = false,
   subtitle = 'Comissão de Aeroportos da Região Amazônica',
@@ -24,10 +24,10 @@ export const ComaraLogo: React.FC<ComaraLogoProps> = ({
 
   // Size mapping for the insignia / emblem
   const sizeClasses = {
-    sm: 'w-7 h-7 text-xs',
-    md: 'w-9 h-9 text-sm',
-    lg: 'w-12 h-12 text-base',
-    xl: 'w-16 h-16 text-lg',
+    sm: 'w-8 h-8 text-xs',
+    md: 'w-10 h-10 text-sm',
+    lg: 'w-14 h-14 text-base',
+    xl: 'w-20 h-20 text-lg',
   };
 
   const textSizes = {
@@ -37,7 +37,8 @@ export const ComaraLogo: React.FC<ComaraLogoProps> = ({
     xl: { title: 'text-xl sm:text-2xl', sub: 'text-xs sm:text-sm' },
   };
 
-  const hasCustomImage = Boolean(logoUrl && logoUrl.trim().length > 0 && !imageError);
+  const effectiveLogoUrl = logoUrl && logoUrl.trim().length > 0 ? logoUrl : '/logo.png';
+  const hasCustomImage = Boolean(effectiveLogoUrl && !imageError);
 
   return (
     <div 
@@ -50,7 +51,7 @@ export const ComaraLogo: React.FC<ComaraLogoProps> = ({
           sizeClasses[size]
         } ${isDark ? 'bg-[#15171C] border-[#2A2E38]' : 'bg-white border-slate-200'}`}>
           <img
-            src={logoUrl}
+            src={effectiveLogoUrl}
             alt="Logomarca COMARA"
             className="w-full h-full object-contain p-0.5"
             referrerPolicy="no-referrer"

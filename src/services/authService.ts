@@ -20,12 +20,6 @@ function sanitize<T extends Record<string, any>>(obj: T): Record<string, any> {
   return clean;
 }
 
-// Normalizador seguro de CPF (apenas dígitos numéricos)
-export function normalizeCpf(cpf?: string): string {
-  if (!cpf) return '';
-  return cpf.replace(/\D/g, '').trim();
-}
-
 // Normalizador seguro de Datas (converte DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD ou ISO para YYYY-MM-DD)
 export function normalizeDateString(dateStr?: string): string {
   if (!dateStr) return '';
@@ -263,12 +257,11 @@ export const authService = {
   },
 
   // -------------------------------------------------------------
-  // VALIDAÇÃO CADASTRAL PARA RECUPERAÇÃO / PRIMEIRO ACESSO (100% FIRESTORE)
+  // VALIDAÇÃO CADASTRAL PARA RECUPERAÇÃO / PRIMEIRO ACESSO (100% FIRESTORE - LGPD)
   // -------------------------------------------------------------
   async validateCollaboratorForReset(
     matricula: string,
     emailAttempt: string,
-    dataNascimentoAttempt: string,
     employeesList: Employee[] = []
   ): Promise<{ success: boolean; employee?: Employee; message: string }> {
     const cleanMat = matricula.trim().toUpperCase();
@@ -279,10 +272,11 @@ export const authService = {
       };
     }
 
-    if (!emailAttempt.trim() && !dataNascimentoAttempt.trim()) {
+    const cleanInputEmail = emailAttempt.trim().toLowerCase();
+    if (!cleanInputEmail || !cleanInputEmail.includes('@')) {
       return { 
         success: false, 
-        message: 'Por favor, informe o E-mail cadastrado e a Data de Nascimento.' 
+        message: 'Por favor, informe o E-mail cadastrado válido.' 
       };
     }
 
@@ -331,43 +325,28 @@ export const authService = {
       };
     }
 
-    // 2. Validação simultânea dos dados cadastrais: E-mail e Data de Nascimento
-    const inputEmailClean = emailAttempt.trim().toLowerCase();
+    // 2. Validação cadastral do E-mail cadastrado
     const registeredEmailClean = (matched.email || '').trim().toLowerCase();
-    const normalizedInputDate = normalizeDateString(dataNascimentoAttempt);
-    const registeredDate = normalizeDateString(matched.dataNascimento);
 
     let isEmailValid = false;
-    let isDateValid = false;
-
-    // Se o colaborador tem e-mail cadastrado no sistema
     if (registeredEmailClean) {
-      isEmailValid = (inputEmailClean === registeredEmailClean);
+      isEmailValid = (cleanInputEmail === registeredEmailClean);
     } else {
-      // Se não possui e-mail cadastrado na ficha, aceita e-mail corporativo válido digitado
-      isEmailValid = inputEmailClean.length >= 5 && inputEmailClean.includes('@');
+      // Se não possui e-mail cadastrado na ficha, aceita e-mail corporativo válido informado
+      isEmailValid = cleanInputEmail.length >= 5 && cleanInputEmail.includes('@');
     }
 
-    // Se o colaborador tem data de nascimento cadastrada no sistema
-    if (registeredDate) {
-      isDateValid = (normalizedInputDate === registeredDate);
-    } else {
-      // Se a data de nascimento estiver ausente na ficha, aceita se o e-mail conferiu
-      isDateValid = isEmailValid && normalizedInputDate.length >= 8;
-    }
-
-    // A validação cadastral requer que os campos conferem simultaneamente
-    if (!isEmailValid || !isDateValid) {
+    if (!isEmailValid) {
       await this.logAccess(
         cleanMat,
         matched.nome,
         'RECUPERACAO_SENHA',
         false,
-        'Tentativa de recuperação: Dados divergentes de E-mail ou Data de Nascimento'
+        'Tentativa de recuperação: E-mail divergente do cadastro'
       );
       return { 
         success: false, 
-        message: 'Dados informados não conferem com o cadastro. Procure o setor de RH (DA).' 
+        message: 'O e-mail informado não confere com o cadastro desta matrícula. Procure o setor de RH (DA).' 
       };
     }
 
@@ -377,7 +356,7 @@ export const authService = {
       matched.nome,
       'RECUPERACAO_SENHA',
       true,
-      'Identidade cadastral validada com sucesso para redefinição de senha'
+      'Identidade cadastral validada com sucesso via Matrícula + E-mail para redefinição de senha'
     );
 
     return {
@@ -476,14 +455,12 @@ export const authService = {
   async resetPasswordByMatriculaAndEmail(
     matricula: string,
     emailAttempt: string,
-    dataNascimentoAttempt: string,
     newPassword: string,
     employeesList: Employee[]
   ): Promise<{ success: boolean; message: string }> {
     const valRes = await this.validateCollaboratorForReset(
       matricula,
       emailAttempt,
-      dataNascimentoAttempt,
       employeesList
     );
 
@@ -500,222 +477,28 @@ export const authService = {
   },
 
   // -------------------------------------------------------------
-  // VALIDAÇÃO TRIPLA (MATRÍCULA, CPF E DATA DE NASCIMENTO)
+  // VALIDAÇÃO DE IDENTIDADE CADASTRAL (MATRÍCULA + E-MAIL)
   // -------------------------------------------------------------
   async validateTripleIdentity(
     matricula: string,
-    cpfAttempt: string,
-    dataNascimentoAttempt: string,
-    employeesList: Employee[]
+    emailOrCpfAttempt: string,
+    _dataNascimentoAttempt?: string,
+    employeesList: Employee[] = []
   ): Promise<{ success: boolean; employee?: Employee; message: string }> {
-    const cleanMat = matricula.trim().toUpperCase();
-    if (!cleanMat) {
-      return { success: false, message: 'Por favor, informe a Matrícula.' };
-    }
-
-    const cleanInputCpf = normalizeCpf(cpfAttempt);
-    if (!cleanInputCpf || cleanInputCpf.length < 6) {
-      return { success: false, message: 'Por favor, informe um CPF válido com no mínimo 11 dígitos.' };
-    }
-
-    const normalizedInputDate = normalizeDateString(dataNascimentoAttempt);
-    if (!normalizedInputDate) {
-      return { success: false, message: 'Por favor, informe a Data de Nascimento no formato correto.' };
-    }
-
-    // 1. Busca do colaborador na base
-    let matched = employeesList.find(
-      (e) => e.matricula.trim().toUpperCase() === cleanMat ||
-             e.matricula.replace(/^0+/, '').toUpperCase() === cleanMat.replace(/^0+/, '')
-    );
-
-    // Fallback: Busca direta no Firestore se não encontrado na lista
-    if (!matched) {
-      try {
-        const docRef = doc(db, COLLECTIONS.COLABORADORES, cleanMat);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          matched = docSnap.data() as Employee;
-        }
-      } catch (err) {
-        console.warn('Erro na busca de colaborador no Firestore:', err);
-      }
-    }
-
-    if (!matched) {
-      await this.logAccess(
-        cleanMat,
-        'Desconhecido',
-        'TENTATIVA_INVALIDA',
-        false,
-        'Validação tripla falhou: Matrícula não localizada no cadastro'
-      );
-      return {
-        success: false,
-        message: `Matrícula "${cleanMat}" não foi localizada na base de dados de colaboradores.`
-      };
-    }
-
-    // 2. Validação do CPF
-    const registeredCpf = normalizeCpf(matched.cpf);
-    if (!registeredCpf) {
-      await this.logAccess(
-        cleanMat,
-        matched.nome,
-        'TENTATIVA_INVALIDA',
-        false,
-        'Validação tripla falhou: CPF não consta na ficha do colaborador'
-      );
-      return {
-        success: false,
-        message: 'CPF não cadastrado na ficha deste colaborador. Solicite a atualização dos seus dados com o Gestor de RH.'
-      };
-    }
-
-    if (cleanInputCpf !== registeredCpf) {
-      await this.logAccess(
-        cleanMat,
-        matched.nome,
-        'TENTATIVA_INVALIDA',
-        false,
-        'Validação tripla falhou: CPF divergente do registro cadastral'
-      );
-      return {
-        success: false,
-        message: 'O CPF informado não confere com o registro cadastral desta matrícula.'
-      };
-    }
-
-    // 3. Validação da Data de Nascimento
-    const registeredDate = normalizeDateString(matched.dataNascimento);
-    if (!registeredDate) {
-      await this.logAccess(
-        cleanMat,
-        matched.nome,
-        'TENTATIVA_INVALIDA',
-        false,
-        'Validação tripla falhou: Data de nascimento não consta no cadastro'
-      );
-      return {
-        success: false,
-        message: 'Data de nascimento não cadastrada na ficha deste colaborador. Solicite a atualização com o RH.'
-      };
-    }
-
-    if (normalizedInputDate !== registeredDate) {
-      await this.logAccess(
-        cleanMat,
-        matched.nome,
-        'TENTATIVA_INVALIDA',
-        false,
-        'Validação tripla falhou: Data de nascimento divergente do registro cadastral'
-      );
-      return {
-        success: false,
-        message: 'A Data de Nascimento informada não confere com os registros cadastrais.'
-      };
-    }
-
-    // Validação Tripla 100% Concluída com Sucesso
-    await this.logAccess(
-      cleanMat,
-      matched.nome,
-      'PRIMEIRO_ACESSO',
-      true,
-      'Identidade validada com sucesso via Validação Tripla (Matrícula + CPF + Data Nascimento)'
-    );
-
-    return {
-      success: true,
-      employee: matched,
-      message: `Identidade confirmada para ${matched.nome}! Agora digite sua nova senha de acesso.`
-    };
+    return this.validateCollaboratorForReset(matricula, emailOrCpfAttempt, employeesList);
   },
 
   // -------------------------------------------------------------
-  // SALVAR NOVA SENHA APÓS VALIDAÇÃO TRIPLA
+  // SALVAR NOVA SENHA APÓS VALIDAÇÃO CADASTRAL
   // -------------------------------------------------------------
   async confirmNewPasswordWithTripleValidation(
     matricula: string,
     employee: Employee,
-    cpfAttempt: string,
-    dataNascimentoAttempt: string,
+    _cpfAttempt: string,
+    _dataNascimentoAttempt: string,
     newPassword: string
   ): Promise<{ success: boolean; message: string }> {
-    const cleanMatricula = matricula.trim().toUpperCase();
-
-    if (newPassword.length < 4) {
-      return { success: false, message: 'A nova senha deve ter no mínimo 4 caracteres.' };
-    }
-
-    // Re-valida segurança dos dados
-    const cleanInputCpf = normalizeCpf(cpfAttempt);
-    const registeredCpf = normalizeCpf(employee.cpf);
-    const normalizedInputDate = normalizeDateString(dataNascimentoAttempt);
-    const registeredDate = normalizeDateString(employee.dataNascimento);
-
-    if (registeredCpf && cleanInputCpf !== registeredCpf) {
-      return { success: false, message: 'Falha de segurança: CPF não coincide.' };
-    }
-
-    if (registeredDate && normalizedInputDate !== registeredDate) {
-      return { success: false, message: 'Falha de segurança: Data de nascimento não coincide.' };
-    }
-
-    const passwordHash = await hashPassword(newPassword);
-    const nowIso = new Date().toISOString();
-
-    const authDataToSave = sanitize({
-      matricula: cleanMatricula,
-      passwordHash,
-      senhaDefinida: true,
-      email: employee.email || '',
-      tokenRecuperacao: null,
-      tokenExpiracao: null,
-      ultimoAcesso: nowIso,
-      atualizadoEm: nowIso,
-    });
-
-    saveLocalAuth(cleanMatricula, {
-      matricula: cleanMatricula,
-      passwordHash,
-      senhaDefinida: true,
-      email: employee.email,
-      ultimoAcesso: nowIso,
-      atualizadoEm: nowIso,
-    });
-
-    // Atualiza persistentemente tanto 'colaboradores_auth' quanto 'colaboradores'
-    try {
-      await Promise.all([
-        setDoc(doc(db, COLLECTIONS.COLABORADORES_AUTH, cleanMatricula), authDataToSave, { merge: true }),
-        setDoc(doc(db, COLLECTIONS.COLABORADORES, cleanMatricula), {
-          primeiroAcesso: false,
-          senhaCadastrada: true,
-          atualizadoEm: nowIso,
-        }, { merge: true }),
-      ]);
-    } catch (e) {
-      console.warn('Erro ao salvar nova senha no Firestore:', e);
-    }
-
-    // Atualiza objeto em memória
-    employee.primeiroAcesso = false;
-    employee.senhaCadastrada = true;
-    employee.atualizadoEm = nowIso;
-
-    await this.logAccess(
-      cleanMatricula,
-      employee.nome,
-      'DEFINICAO_SENHA',
-      true,
-      'Senha definida com sucesso via Validação Tripla (Matrícula + CPF + Data Nascimento)'
-    );
-
-    return {
-      success: true,
-      message: 'Senha cadastrada com sucesso! Você já pode consultar seu extrato de ponto.'
-    };
+    return this.resetCollaboratorPassword(matricula, newPassword, employee);
   },
 
   // -------------------------------------------------------------

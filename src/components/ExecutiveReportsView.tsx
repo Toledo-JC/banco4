@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { Employee, TimeRecord, InsalubrityRecord, Branch, SystemConfig } from '../types';
-import { getEmployeeTotalBalance, formatHoursDecimal, formatHoursToDays } from '../utils/calculations';
+import { Employee, TimeRecord, InsalubrityRecord, Branch, SystemConfig, AdminRole } from '../types';
 import { ComaraLogo } from './ComaraLogo';
+import { InsalubrityConversionModal } from './InsalubrityConversionModal';
 import { 
   FileSpreadsheet, 
   Printer, 
@@ -21,7 +21,12 @@ import {
   ArrowRight,
   HardHat,
   Sparkles,
-  ChevronDown
+  ChevronDown,
+  Table,
+  ArrowRightLeft,
+  ListFilter,
+  Check,
+  CalendarDays
 } from 'lucide-react';
 
 interface ExecutiveReportsViewProps {
@@ -30,10 +35,15 @@ interface ExecutiveReportsViewProps {
   insalubrityRecords: InsalubrityRecord[];
   systemConfig?: SystemConfig;
   currentUserEmail?: string;
+  userRole?: AdminRole;
   theme?: 'dark' | 'light';
+  onSaveInsalubrityBatch?: (records: InsalubrityRecord[]) => Promise<void>;
+  onNavigateToInsalubrity?: () => void;
 }
 
-type ReportType = 'BANCO_HORAS' | 'INSALUBRIDADE' | 'CONSOLIDADO_GERAL';
+type ReportType = 'BANCO_HORAS' | 'INSALUBRIDADE';
+type InsalubritySubMode = 'SIMPLES' | 'AVANCADO';
+type SimpleViewFormat = 'RESUMO_COLABORADOR' | 'LISTAGEM_DIARIA';
 
 export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
   employees,
@@ -41,7 +51,10 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
   insalubrityRecords,
   systemConfig,
   currentUserEmail = 'coari.comara@gmail.com',
+  userRole = 'SUPER_ADMIN',
   theme = 'dark',
+  onSaveInsalubrityBatch,
+  onNavigateToInsalubrity,
 }) => {
   const isDark = theme === 'dark';
   const printRef = useRef<HTMLDivElement>(null);
@@ -52,11 +65,18 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
   const lastDayOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
 
   const [reportType, setReportType] = useState<ReportType>('BANCO_HORAS');
+  const [insalubritySubMode, setInsalubritySubMode] = useState<InsalubritySubMode>('SIMPLES');
+  const [simpleViewFormat, setSimpleViewFormat] = useState<SimpleViewFormat>('RESUMO_COLABORADOR');
   const [startDate, setStartDate] = useState(firstDayOfMonth);
   const [endDate, setEndDate] = useState(lastDayOfMonth);
   const [selectedBranch, setSelectedBranch] = useState<string>('TODAS');
   const [selectedStatus, setSelectedStatus] = useState<string>('TODOS');
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Modal de Conversão Simples -> Avançado
+  const [isConversionModalOpen, setIsConversionModalOpen] = useState(false);
+
+  const isAdvancedUser = userRole === 'SUPER_ADMIN' || userRole === 'GESTOR_RH' || userRole === 'GERENTE_CAMPO' || userRole === 'ROLE_GERENTE';
 
   // -------------------------------------------------------------
   // PRESET RÁPIDO DE DATAS
@@ -116,7 +136,6 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
     const horasBrutas = Number(r.horasBrutas) || 0;
     const mult = Number(r.multiplicador) || 1;
 
-    // Fallback caso saldoCalculado não esteja computado
     if (isNaN(saldo) || (saldo === 0 && (horasBrutas > 0 || (r as any).horasExtras50 || (r as any).horasExtras100))) {
       if (r.tipoOcorrencia === 'TRABALHO' && horasBrutas > 0) {
         saldo = horasBrutas * mult;
@@ -158,7 +177,7 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
   };
 
   // -------------------------------------------------------------
-  // PROCESSAMENTO: DADOS DE BANCO DE HORAS POR PERÍODO
+  // 1. PROCESSAMENTO: DADOS DE BANCO DE HORAS POR PERÍODO
   // -------------------------------------------------------------
   const bancoHorasData = useMemo(() => {
     return employees
@@ -175,10 +194,8 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
         return true;
       })
       .map((emp) => {
-        // Encontrar todos os registros do colaborador
         const empRecords = records.filter((r) => matchRecordToEmployee(r, emp));
 
-        // 1. Saldo Anterior (registros com data anterior a startDate)
         const priorRecords = empRecords.filter((r) => {
           const d = getRecordDate(r);
           return d && d < startDate;
@@ -188,7 +205,6 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
         const priorDebits = priorRecords.reduce((sum, r) => sum + extractRecordImpact(r).debit, 0);
         const saldoAnterior = (Number(emp.saldoInicialHoras) || 0) + priorCredits - priorDebits;
 
-        // 2. Movimentação no Período Selecionado (startDate <= data <= endDate)
         const periodRecords = empRecords.filter((r) => {
           const d = getRecordDate(r);
           return d && d >= startDate && d <= endDate;
@@ -212,10 +228,8 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
         });
 
         const saldoPeriodo = creditosPeriodo - debitosPeriodo;
-
-        // 3. Saldo Final Consolidado (Saldo Anterior + Saldo Período)
         const saldoFinalHoras = saldoAnterior + saldoPeriodo;
-        const saldoFinalDias = saldoFinalHoras / 8.8; // 8.8h padrão jornada operacional COMARA
+        const saldoFinalDias = saldoFinalHoras / 8.8;
 
         return {
           matricula: emp.matricula,
@@ -239,7 +253,6 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
       .sort((a, b) => a.nome.localeCompare(b.nome));
   }, [employees, records, startDate, endDate, selectedBranch, selectedStatus, searchQuery]);
 
-  // Totais do Banco de Horas
   const totalBancoHoras = useMemo(() => {
     return bancoHorasData.reduce(
       (acc, curr) => ({
@@ -266,9 +279,28 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
   }, [bancoHorasData]);
 
   // -------------------------------------------------------------
-  // PROCESSAMENTO: DADOS DE INSALUBRIDADE POR PERÍODO
+  // 2. PROCESSAMENTO: DADOS DE INSALUBRIDADE (SIMPLES & AVANÇADO)
   // -------------------------------------------------------------
-  const insalubridadeData = useMemo(() => {
+  
+  // Registros de insalubridade dentro da janela do período
+  const periodInsalubrityRecords = useMemo(() => {
+    return insalubrityRecords.filter((r) => {
+      const rDate = normalizeDateStr(r.dataEvento);
+      if (rDate < startDate || rDate > endDate) return false;
+      if (selectedBranch !== 'TODAS' && r.sede !== selectedBranch) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchName = (r.nomeColaborador || '').toLowerCase().includes(q);
+        const matchMat = (r.matricula || '').toLowerCase().includes(q);
+        const matchAct = (r.atividadeDesempenhada || '').toLowerCase().includes(q);
+        if (!matchName && !matchMat && !matchAct) return false;
+      }
+      return true;
+    }).sort((a, b) => b.dataEvento.localeCompare(a.dataEvento));
+  }, [insalubrityRecords, startDate, endDate, selectedBranch, searchQuery]);
+
+  // Modo Simples: Resumo por Colaborador focado em ATIVIDADES REALIZADAS (sem porcentagens)
+  const insalubridadeSimpleData = useMemo(() => {
     return employees
       .filter((emp) => {
         if (selectedBranch !== 'TODAS' && (emp.sede_atual || emp.sede) !== selectedBranch) return false;
@@ -285,12 +317,79 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
         const cleanEmpMat = (emp.matricula || '').trim().toUpperCase();
         const cleanEmpMatNoZero = cleanEmpMat.replace(/^0+/, '');
 
-        const empInsalubrity = insalubrityRecords.filter((r) => {
+        const empRecords = periodInsalubrityRecords.filter((r) => {
           const rMat = (r.matricula || '').trim().toUpperCase();
           const rMatNoZero = rMat.replace(/^0+/, '');
-          const matchMat = rMat && (rMat === cleanEmpMat || rMatNoZero === cleanEmpMatNoZero);
-          const rDate = normalizeDateStr(r.dataEvento);
-          return matchMat && rDate >= startDate && rDate <= endDate;
+          return rMat && (rMat === cleanEmpMat || rMatNoZero === cleanEmpMatNoZero);
+        });
+
+        // Contabilizar atividades distintas e dias apontados
+        const activityCounts: Record<string, number> = {};
+        const datesSet = new Set<string>();
+        let latestDate = '';
+        let latestActivity = '';
+        let lastResponsavel = '';
+
+        empRecords.forEach((r) => {
+          const act = (r.atividadeDesempenhada || 'SERVIÇO GERAL').trim().toUpperCase();
+          activityCounts[act] = (activityCounts[act] || 0) + 1;
+          datesSet.add(r.dataEvento);
+          if (!latestDate || r.dataEvento > latestDate) {
+            latestDate = r.dataEvento;
+            latestActivity = act;
+            lastResponsavel = r.responsavelLancamento || 'Encarregado de Campo';
+          }
+        });
+
+        const totalDiasTrabalhados = datesSet.size;
+        const totalApontamentos = empRecords.length;
+
+        // Montar string resumida: "CONCRETO (8d), CANALETA (4d), ASFALTO (2d)"
+        const activitySummaryList = Object.entries(activityCounts).map(([act, count]) => {
+          return `${act} (${count}d)`;
+        });
+
+        return {
+          matricula: emp.matricula,
+          nome: emp.nome,
+          sede: emp.sede_atual || emp.sede || 'KO',
+          funcao: emp.funcao || emp.cargo || 'Operacional',
+          totalDiasTrabalhados,
+          totalApontamentos,
+          activityCounts,
+          activitySummary: activitySummaryList.join(', ') || 'Nenhum serviço apontado no período',
+          activitiesList: Object.keys(activityCounts),
+          latestDate,
+          latestActivity,
+          lastResponsavel,
+          records: empRecords,
+        };
+      })
+      .sort((a, b) => b.totalDiasTrabalhados - a.totalDiasTrabalhados || a.nome.localeCompare(b.nome));
+  }, [employees, periodInsalubrityRecords, selectedBranch, selectedStatus, searchQuery]);
+
+  // Modo Avançado: Com porcentagens NR-15 (10%, 20%, 40%) e Adicional Fixo
+  const insalubridadeAdvancedData = useMemo(() => {
+    return employees
+      .filter((emp) => {
+        if (selectedBranch !== 'TODAS' && (emp.sede_atual || emp.sede) !== selectedBranch) return false;
+        if (selectedStatus !== 'TODOS' && emp.status !== selectedStatus) return false;
+        if (searchQuery.trim()) {
+          const q = searchQuery.toLowerCase().trim();
+          const matchName = emp.nome.toLowerCase().includes(q);
+          const matchMat = emp.matricula.toLowerCase().includes(q);
+          if (!matchName && !matchMat) return false;
+        }
+        return true;
+      })
+      .map((emp) => {
+        const cleanEmpMat = (emp.matricula || '').trim().toUpperCase();
+        const cleanEmpMatNoZero = cleanEmpMat.replace(/^0+/, '');
+
+        const empInsalubrity = periodInsalubrityRecords.filter((r) => {
+          const rMat = (r.matricula || '').trim().toUpperCase();
+          const rMatNoZero = rMat.replace(/^0+/, '');
+          return rMat && (rMat === cleanEmpMat || rMatNoZero === cleanEmpMatNoZero);
         });
 
         const horas40 = empInsalubrity
@@ -328,11 +427,42 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
         };
       })
       .sort((a, b) => a.nome.localeCompare(b.nome));
-  }, [employees, insalubrityRecords, startDate, endDate, selectedBranch, selectedStatus, searchQuery]);
+  }, [employees, periodInsalubrityRecords, selectedBranch, selectedStatus, searchQuery]);
 
-  // Totais de Insalubridade
-  const totalInsalubridade = useMemo(() => {
-    return insalubridadeData.reduce(
+  // Totais de Insalubridade Simples
+  const totalInsalubridadeSimple = useMemo(() => {
+    let colaboradoresAtivos = 0;
+    let totalDiasCampo = 0;
+    let totalApontamentos = 0;
+    const activityTotals: Record<string, number> = {};
+
+    insalubridadeSimpleData.forEach((item) => {
+      if (item.totalDiasTrabalhados > 0) {
+        colaboradoresAtivos++;
+        totalDiasCampo += item.totalDiasTrabalhados;
+        totalApontamentos += item.totalApontamentos;
+
+        Object.entries(item.activityCounts).forEach(([act, count]) => {
+          activityTotals[act] = (activityTotals[act] || 0) + count;
+        });
+      }
+    });
+
+    const topActivities = Object.entries(activityTotals)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3);
+
+    return {
+      colaboradoresAtivos,
+      totalDiasCampo,
+      totalApontamentos,
+      topActivities,
+    };
+  }, [insalubridadeSimpleData]);
+
+  // Totais de Insalubridade Avançada
+  const totalInsalubridadeAdvanced = useMemo(() => {
+    return insalubridadeAdvancedData.reduce(
       (acc, curr) => ({
         totalFixoComAdicional: acc.totalFixoComAdicional + (curr.grauFixo !== 'ISENTO' ? 1 : 0),
         totalHoras40: acc.totalHoras40 + curr.horas40,
@@ -352,7 +482,7 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
         totalApontamentos: 0,
       }
     );
-  }, [insalubridadeData]);
+  }, [insalubridadeAdvancedData]);
 
   // -------------------------------------------------------------
   // EXPORTAÇÃO EXCEL (CSV FORMATADO BR)
@@ -401,8 +531,39 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
         item.saldoFinalDias.toFixed(2).replace('.', ','),
         item.saldoFinalHoras > 0.05 ? 'CREDOR' : item.saldoFinalHoras < -0.05 ? 'DEVEDOR' : 'ZERADO',
       ]);
+    } else if (reportType === 'INSALUBRIDADE' && insalubritySubMode === 'SIMPLES') {
+      // MODO SIMPLES CSV: O que a pessoa fez (sem porcentagens)
+      filename = `relatorio_insalubridade_modo_simples_${startDate}_a_${endDate}.csv`;
+      headers = [
+        'Nº',
+        'Matrícula',
+        'Colaborador',
+        'Canteiro/Sede',
+        'Função/Cargo',
+        'Dias Trabalhados com Atividade',
+        'Total Apontamentos',
+        'Resumo de Serviços Realizados',
+        'Último Serviço Apontado',
+        'Última Data',
+        'Responsável pelo Apontamento'
+      ];
+
+      rows = insalubridadeSimpleData.map((item, idx) => [
+        (idx + 1).toString(),
+        `"${item.matricula}"`,
+        `"${item.nome}"`,
+        `"${item.sede}"`,
+        `"${item.funcao}"`,
+        item.totalDiasTrabalhados.toString(),
+        item.totalApontamentos.toString(),
+        `"${item.activitySummary.replace(/"/g, '""')}"`,
+        `"${item.latestActivity}"`,
+        item.latestDate ? item.latestDate.split('-').reverse().join('/') : '-',
+        `"${item.lastResponsavel.replace(/"/g, '""')}"`,
+      ]);
     } else {
-      filename = `relatorio_insalubridade_${startDate}_a_${endDate}.csv`;
+      // MODO AVANÇADO CSV: NR-15 Analítico com 10%, 20%, 40%
+      filename = `relatorio_insalubridade_nr15_avancado_${startDate}_a_${endDate}.csv`;
       headers = [
         'Matrícula',
         'Colaborador',
@@ -418,7 +579,7 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
         'Resumo Atividades Executadas',
       ];
 
-      rows = insalubridadeData.map((item) => [
+      rows = insalubridadeAdvancedData.map((item) => [
         `"${item.matricula}"`,
         `"${item.nome}"`,
         `"${item.sede}"`,
@@ -474,12 +635,24 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
               </span>
             </div>
             <p className={`text-xs mt-0.5 ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
-              Emissão analítica e sintética de Banco de Horas e Insalubridade com filtro de período
+              Emissão analítica e sintética de Banco de Horas e Insalubridade (Modo Simples de Atividades e Modo Avançado NR-15)
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Botão de Conversão Simples -> Avançado (para perfis gestor/admin) */}
+          {reportType === 'INSALUBRIDADE' && isAdvancedUser && onSaveInsalubrityBatch && (
+            <button
+              onClick={() => setIsConversionModalOpen(true)}
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-600 to-blue-600 hover:from-amber-500 hover:to-blue-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-md shadow-blue-600/20 active:scale-98 cursor-pointer"
+              title="Converter lançamentos do modo simples para enquadramento NR-15"
+            >
+              <ArrowRightLeft className="w-4 h-4" />
+              <span>Converter p/ Modo Avançado</span>
+            </button>
+          )}
+
           <button
             onClick={handleExportCSV}
             className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-2 transition-all shadow-md shadow-emerald-600/20 active:scale-98 cursor-pointer"
@@ -499,48 +672,81 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
       </div>
 
       {/* ------------------------------------------------------------- */}
-      {/* 2. PAINEL DE FILTROS & SELEÇÃO DE PERÍODO                     */}
+      {/* 2. PAINEL DE FILTROS & SELEÇÃO DE PERÍODO & SUB-MODOS         */}
       {/* ------------------------------------------------------------- */}
       <div className={`p-5 rounded-2xl border space-y-4 print:hidden ${
         isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200 shadow-xs'
       }`}>
         {/* Tipo de Relatório Toggle */}
-        <div className="flex items-center gap-2 border-b pb-4 flex-wrap">
-          <span className={`text-xs font-bold mr-2 ${isDark ? 'text-[#8E9299]' : 'text-slate-600'}`}>
-            TIPO DE RELATÓRIO:
-          </span>
-          
-          <button
-            onClick={() => setReportType('BANCO_HORAS')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-              reportType === 'BANCO_HORAS'
-                ? isDark 
-                  ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30 shadow-xs' 
-                  : 'bg-blue-50 text-blue-700 border border-blue-200 shadow-xs'
-                : isDark 
-                  ? 'text-[#8E9299] hover:bg-[#1F2229]' 
-                  : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Clock className="w-4 h-4" />
-            <span>1. Banco de Horas (Saldo Anterior, Acumulado, Saldo Final)</span>
-          </button>
+        <div className="flex items-center justify-between gap-3 border-b pb-4 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`text-xs font-bold mr-2 ${isDark ? 'text-[#8E9299]' : 'text-slate-600'}`}>
+              TIPO DE RELATÓRIO:
+            </span>
+            
+            <button
+              onClick={() => setReportType('BANCO_HORAS')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                reportType === 'BANCO_HORAS'
+                  ? isDark 
+                    ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30 shadow-xs' 
+                    : 'bg-blue-50 text-blue-700 border border-blue-200 shadow-xs'
+                  : isDark 
+                    ? 'text-[#8E9299] hover:bg-[#1F2229]' 
+                    : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <Clock className="w-4 h-4" />
+              <span>1. Banco de Horas (Saldo Anterior, Acumulado, Saldo Final)</span>
+            </button>
 
-          <button
-            onClick={() => setReportType('INSALUBRIDADE')}
-            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-              reportType === 'INSALUBRIDADE'
-                ? isDark 
-                  ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30 shadow-xs' 
-                  : 'bg-amber-50 text-amber-700 border border-amber-200 shadow-xs'
-                : isDark 
-                  ? 'text-[#8E9299] hover:bg-[#1F2229]' 
-                  : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <ShieldAlert className="w-4 h-4" />
-            <span>2. Insalubridade (Adicional Fixo + Apontamentos por Atividade)</span>
-          </button>
+            <button
+              onClick={() => setReportType('INSALUBRIDADE')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                reportType === 'INSALUBRIDADE'
+                  ? isDark 
+                    ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30 shadow-xs' 
+                    : 'bg-amber-50 text-amber-700 border border-amber-200 shadow-xs'
+                  : isDark 
+                    ? 'text-[#8E9299] hover:bg-[#1F2229]' 
+                    : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              <ShieldAlert className="w-4 h-4" />
+              <span>2. Insalubridade & Serviços em Campo</span>
+            </button>
+          </div>
+
+          {/* Seletor de Sub-Modo de Insalubridade: MODO SIMPLES vs MODO AVANÇADO */}
+          {reportType === 'INSALUBRIDADE' && (
+            <div className="flex items-center gap-1.5 p-1 rounded-xl bg-black/10 dark:bg-black/40 border border-black/5 dark:border-white/5">
+              <button
+                onClick={() => setInsalubritySubMode('SIMPLES')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  insalubritySubMode === 'SIMPLES'
+                    ? 'bg-amber-500 text-black shadow-xs font-black'
+                    : isDark ? 'text-gray-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Relatório focado nas atividades e serviços de campo executados (sem porcentagens)"
+              >
+                <Table className="w-3.5 h-3.5" />
+                <span>Modo Simples (O que a pessoa fez)</span>
+              </button>
+
+              <button
+                onClick={() => setInsalubritySubMode('AVANCADO')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  insalubritySubMode === 'AVANCADO'
+                    ? 'bg-blue-600 text-white shadow-xs font-black'
+                    : isDark ? 'text-gray-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="Relatório analítico de insalubridade com enquadramento NR-15 (10%, 20%, 40%) e adicional fixo"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Modo Avançado (NR-15 % e Horas)</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Filtros em Linha */}
@@ -577,7 +783,7 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
           {/* Sede */}
           <div>
             <label className={`block text-[11px] font-bold mb-1 ${isDark ? 'text-[#8E9299]' : 'text-slate-600'}`}>
-              SEDE OPERACIONAL
+              SEDE OPERACIONAL / CANTEIRO
             </label>
             <select
               value={selectedBranch}
@@ -616,42 +822,71 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
         </div>
 
         {/* Presets Rápidos de Data */}
-        <div className="flex items-center gap-2 pt-1 flex-wrap text-xs">
-          <span className={`text-[11px] font-bold ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
-            Períodos Rápidos:
-          </span>
-          <button
-            onClick={() => applyDatePreset('THIS_MONTH')}
-            className={`px-2.5 py-1 rounded-lg border text-[11px] transition-colors cursor-pointer ${
-              isDark ? 'bg-[#0D0F14] border-[#1F2229] text-gray-300 hover:text-white' : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
-            }`}
-          >
-            Mês Atual
-          </button>
-          <button
-            onClick={() => applyDatePreset('LAST_MONTH')}
-            className={`px-2.5 py-1 rounded-lg border text-[11px] transition-colors cursor-pointer ${
-              isDark ? 'bg-[#0D0F14] border-[#1F2229] text-gray-300 hover:text-white' : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
-            }`}
-          >
-            Mês Anterior
-          </button>
-          <button
-            onClick={() => applyDatePreset('YEAR_TO_DATE')}
-            className={`px-2.5 py-1 rounded-lg border text-[11px] transition-colors cursor-pointer ${
-              isDark ? 'bg-[#0D0F14] border-[#1F2229] text-gray-300 hover:text-white' : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
-            }`}
-          >
-            Ano Atual (YTD)
-          </button>
-          <button
-            onClick={() => applyDatePreset('ALL_TIME')}
-            className={`px-2.5 py-1 rounded-lg border text-[11px] transition-colors cursor-pointer ${
-              isDark ? 'bg-[#0D0F14] border-[#1F2229] text-gray-300 hover:text-white' : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
-            }`}
-          >
-            Histórico Completo
-          </button>
+        <div className="flex items-center justify-between gap-2 pt-1 flex-wrap text-xs">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`text-[11px] font-bold ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+              Períodos Rápidos:
+            </span>
+            <button
+              onClick={() => applyDatePreset('THIS_MONTH')}
+              className={`px-2.5 py-1 rounded-lg border text-[11px] transition-colors cursor-pointer ${
+                isDark ? 'bg-[#0D0F14] border-[#1F2229] text-gray-300 hover:text-white' : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              Mês Atual
+            </button>
+            <button
+              onClick={() => applyDatePreset('LAST_MONTH')}
+              className={`px-2.5 py-1 rounded-lg border text-[11px] transition-colors cursor-pointer ${
+                isDark ? 'bg-[#0D0F14] border-[#1F2229] text-gray-300 hover:text-white' : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              Mês Anterior
+            </button>
+            <button
+              onClick={() => applyDatePreset('YEAR_TO_DATE')}
+              className={`px-2.5 py-1 rounded-lg border text-[11px] transition-colors cursor-pointer ${
+                isDark ? 'bg-[#0D0F14] border-[#1F2229] text-gray-300 hover:text-white' : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              Ano Atual (YTD)
+            </button>
+            <button
+              onClick={() => applyDatePreset('ALL_TIME')}
+              className={`px-2.5 py-1 rounded-lg border text-[11px] transition-colors cursor-pointer ${
+                isDark ? 'bg-[#0D0F14] border-[#1F2229] text-gray-300 hover:text-white' : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              Histórico Completo
+            </button>
+          </div>
+
+          {/* Formato de Visualização no Modo Simples: Resumo por Colaborador vs Listagem Diária */}
+          {reportType === 'INSALUBRIDADE' && insalubritySubMode === 'SIMPLES' && (
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className={`text-[11px] font-bold ${isDark ? 'text-gray-400' : 'text-slate-500'}`}>Formato:</span>
+              <button
+                onClick={() => setSimpleViewFormat('RESUMO_COLABORADOR')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                  simpleViewFormat === 'RESUMO_COLABORADOR'
+                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 font-bold'
+                    : isDark ? 'text-gray-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Resumo por Colaborador
+              </button>
+              <button
+                onClick={() => setSimpleViewFormat('LISTAGEM_DIARIA')}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer ${
+                  simpleViewFormat === 'LISTAGEM_DIARIA'
+                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 font-bold'
+                    : isDark ? 'text-gray-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Apontamentos Diários ({periodInsalubrityRecords.length})
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -676,10 +911,12 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
                 <h3 className="text-sm font-bold tracking-tight text-slate-200 print:text-black">
                   {reportType === 'BANCO_HORAS' 
                     ? 'RELATÓRIO GERENCIAL DE BANCO DE HORAS SPTF / CLT'
-                    : 'RELATÓRIO ANALÍTICO DE INSALUBRIDADE (NR-15)'}
+                    : insalubritySubMode === 'SIMPLES'
+                      ? 'RELATÓRIO DE EFETIVO E ATIVIDADES EM CAMPO (MODO SIMPLES)'
+                      : 'RELATÓRIO ANALÍTICO DE INSALUBRIDADE (NR-15)'}
                 </h3>
                 <p className="text-xs text-slate-400 print:text-slate-600 mt-0.5">
-                  Sedes: KO (Coari) • BE (Belém) • MN (Manaus) • Sistema Centralizado
+                  Sedes: KO (Coari) • BE (Belém) • MN (Manaus) • Canteiros Destacados
                 </p>
               </div>
             </div>
@@ -810,31 +1047,217 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
         )}
 
         {/* ========================================================= */}
-        {/* RELATÓRIO 2: INSALUBRIDADE                                */}
+        {/* RELATÓRIO 2: INSALUBRIDADE - MODO SIMPLES                 */}
+        {/* (Focado em o que a pessoa fez em campo - sem porcentagem)  */}
         {/* ========================================================= */}
-        {reportType === 'INSALUBRIDADE' && (
+        {reportType === 'INSALUBRIDADE' && insalubritySubMode === 'SIMPLES' && (
+          <div className="space-y-6">
+            {/* KPI Cards do Modo Simples */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 print:grid-cols-4">
+              <div className={`p-3 rounded-xl border text-center ${isDark ? 'bg-[#0D0F14] border-[#1F2229]' : 'bg-slate-50 border-slate-200'}`}>
+                <span className="text-[10px] text-slate-400 block font-bold">COLABORADORES EM CAMPO</span>
+                <span className="text-lg font-black text-amber-400 print:text-amber-700">{totalInsalubridadeSimple.colaboradoresAtivos}</span>
+              </div>
+
+              <div className={`p-3 rounded-xl border text-center ${isDark ? 'bg-[#0D0F14] border-[#1F2229]' : 'bg-slate-50 border-slate-200'}`}>
+                <span className="text-[10px] text-slate-400 block font-bold">TOTAL DIAS TRABALHADOS</span>
+                <span className="text-lg font-black text-blue-400 print:text-blue-700">{totalInsalubridadeSimple.totalDiasCampo}d</span>
+              </div>
+
+              <div className={`p-3 rounded-xl border text-center ${isDark ? 'bg-[#0D0F14] border-[#1F2229]' : 'bg-slate-50 border-slate-200'}`}>
+                <span className="text-[10px] text-slate-400 block font-bold">TOTAL DE APONTAMENTOS</span>
+                <span className="text-lg font-black text-emerald-400 print:text-emerald-700">{totalInsalubridadeSimple.totalApontamentos}</span>
+              </div>
+
+              <div className={`p-3 rounded-xl border text-center ${isDark ? 'bg-[#0D0F14] border-[#1F2229]' : 'bg-slate-50 border-slate-200'}`}>
+                <span className="text-[10px] text-slate-400 block font-bold">PRINCIPAL ATIVIDADE</span>
+                <span className="text-sm font-black text-purple-400 print:text-purple-700 truncate block">
+                  {totalInsalubridadeSimple.topActivities.length > 0
+                    ? `${totalInsalubridadeSimple.topActivities[0][0]} (${totalInsalubridadeSimple.topActivities[0][1]}d)`
+                    : 'Nenhum lançamento'}
+                </span>
+              </div>
+            </div>
+
+            {/* TABELA: RESUMO POR COLABORADOR (MODO SIMPLES) */}
+            {simpleViewFormat === 'RESUMO_COLABORADOR' ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse border border-slate-700 print:border-slate-300">
+                  <thead>
+                    <tr className="bg-slate-800/80 print:bg-slate-100 text-slate-300 print:text-slate-800 text-[10px] uppercase font-bold border-b border-slate-700 print:border-slate-300">
+                      <th className="p-2 border-r border-slate-700 print:border-slate-300 w-10 text-center">Nº</th>
+                      <th className="p-2 border-r border-slate-700 print:border-slate-300">Matrícula</th>
+                      <th className="p-2 border-r border-slate-700 print:border-slate-300">Colaborador</th>
+                      <th className="p-2 border-r border-slate-700 print:border-slate-300 text-center">Canteiro</th>
+                      <th className="p-2 border-r border-slate-700 print:border-slate-300">Função / Cargo</th>
+                      <th className="p-2 border-r border-slate-700 print:border-slate-300 text-center font-bold text-amber-400 print:text-amber-800">Dias em Campo</th>
+                      <th className="p-2 border-r border-slate-700 print:border-slate-300">Serviços / Atividades Executadas</th>
+                      <th className="p-2 border-r border-slate-700 print:border-slate-300 text-center">Último Serviço</th>
+                      <th className="p-2 text-center">Responsável</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800 print:divide-slate-200">
+                    {insalubridadeSimpleData.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="p-6 text-center text-slate-500">
+                          Nenhum registro de atividade de campo localizado para o período e filtros selecionados.
+                        </td>
+                      </tr>
+                    ) : (
+                      insalubridadeSimpleData.map((item, idx) => {
+                        const hasActivity = item.totalDiasTrabalhados > 0;
+                        return (
+                          <tr key={item.matricula} className="hover:bg-slate-800/30 print:hover:bg-transparent">
+                            <td className="p-2 border-r border-slate-800 print:border-slate-200 text-center text-slate-500">{idx + 1}</td>
+                            <td className="p-2 border-r border-slate-800 print:border-slate-200 font-mono font-bold whitespace-nowrap">{item.matricula}</td>
+                            <td className="p-2 border-r border-slate-800 print:border-slate-200 font-bold whitespace-nowrap">{item.nome}</td>
+                            <td className="p-2 border-r border-slate-800 print:border-slate-200 text-center font-bold">{item.sede}</td>
+                            <td className="p-2 border-r border-slate-800 print:border-slate-200 truncate max-w-[120px]">{item.funcao}</td>
+                            <td className="p-2 border-r border-slate-800 print:border-slate-200 text-center font-mono font-bold">
+                              {hasActivity ? (
+                                <span className="px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                                  {item.totalDiasTrabalhados} {item.totalDiasTrabalhados === 1 ? 'dia' : 'dias'}
+                                </span>
+                              ) : (
+                                <span className="text-slate-500">-</span>
+                              )}
+                            </td>
+                            <td className="p-2 border-r border-slate-800 print:border-slate-200 text-[11px]">
+                              {hasActivity ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {Object.entries(item.activityCounts).map(([act, count]) => (
+                                    <span key={act} className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                      isDark ? 'bg-slate-800 text-gray-200' : 'bg-slate-100 text-slate-800 border border-slate-200'
+                                    }`}>
+                                      {act}: <strong className="text-amber-400">{count}d</strong>
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-slate-500 italic">Sem lançamento no período</span>
+                              )}
+                            </td>
+                            <td className="p-2 border-r border-slate-800 print:border-slate-200 text-center text-[10px] whitespace-nowrap">
+                              {item.latestDate ? (
+                                <div>
+                                  <span className="font-bold text-amber-400">{item.latestActivity}</span>
+                                  <span className="text-slate-400 block text-[9px] font-mono">
+                                    {item.latestDate.split('-').reverse().join('/')}
+                                  </span>
+                                </div>
+                              ) : (
+                                <span className="text-slate-500">-</span>
+                              )}
+                            </td>
+                            <td className="p-2 text-center text-[10px] text-slate-400 truncate max-w-[120px]">
+                              {item.lastResponsavel || '-'}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-900 print:bg-slate-200 font-bold border-t-2 border-slate-600">
+                      <td colSpan={5} className="p-2.5 text-right border-r border-slate-700 uppercase">TOTAIS DE CAMPO:</td>
+                      <td className="p-2.5 text-center border-r border-slate-700 font-mono text-amber-400 print:text-amber-800">
+                        {totalInsalubridadeSimple.totalDiasCampo} dias
+                      </td>
+                      <td colSpan={3} className="p-2.5 text-slate-400 print:text-slate-600 text-[10px]">
+                        {totalInsalubridadeSimple.colaboradoresAtivos} colaboradores com atividade • {totalInsalubridadeSimple.totalApontamentos} ocorrências
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            ) : (
+              /* TABELA: LISTAGEM DIÁRIA DETALHADA DE OCORRÊNCIAS (MODO SIMPLES) */
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse border border-slate-700 print:border-slate-300">
+                  <thead>
+                    <tr className="bg-slate-800/80 print:bg-slate-100 text-slate-300 print:text-slate-800 text-[10px] uppercase font-bold border-b border-slate-700 print:border-slate-300">
+                      <th className="p-2 border-r border-slate-700 print:border-slate-300 w-10 text-center">Nº</th>
+                      <th className="p-2 border-r border-slate-700 print:border-slate-300 text-center">Data</th>
+                      <th className="p-2 border-r border-slate-700 print:border-slate-300">Matrícula</th>
+                      <th className="p-2 border-r border-slate-700 print:border-slate-300">Colaborador</th>
+                      <th className="p-2 border-r border-slate-700 print:border-slate-300 text-center">Canteiro</th>
+                      <th className="p-2 border-r border-slate-700 print:border-slate-300">Função</th>
+                      <th className="p-2 border-r border-slate-700 print:border-slate-300 font-bold text-amber-400 print:text-amber-800">Serviço / Atividade Realizada</th>
+                      <th className="p-2 border-r border-slate-700 print:border-slate-300">Responsável pelo Lançamento</th>
+                      <th className="p-2">Observações de Campo</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800 print:divide-slate-200">
+                    {periodInsalubrityRecords.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="p-6 text-center text-slate-500">
+                          Nenhum lançamento diário de serviço encontrado no período.
+                        </td>
+                      </tr>
+                    ) : (
+                      periodInsalubrityRecords.map((rec, idx) => (
+                        <tr key={rec.id} className="hover:bg-slate-800/30 print:hover:bg-transparent">
+                          <td className="p-2 border-r border-slate-800 print:border-slate-200 text-center text-slate-500">{idx + 1}</td>
+                          <td className="p-2 border-r border-slate-800 print:border-slate-200 text-center font-mono font-bold whitespace-nowrap">
+                            {rec.dataEvento.split('-').reverse().join('/')}
+                          </td>
+                          <td className="p-2 border-r border-slate-800 print:border-slate-200 font-mono font-bold">{rec.matricula}</td>
+                          <td className="p-2 border-r border-slate-800 print:border-slate-200 font-medium whitespace-nowrap">{rec.nomeColaborador}</td>
+                          <td className="p-2 border-r border-slate-800 print:border-slate-200 text-center font-bold">{rec.sede}</td>
+                          <td className="p-2 border-r border-slate-800 print:border-slate-200 truncate max-w-[120px]">{rec.funcao}</td>
+                          <td className="p-2 border-r border-slate-800 print:border-slate-200 font-bold text-amber-400 print:text-amber-800">
+                            {rec.atividadeDesempenhada}
+                          </td>
+                          <td className="p-2 border-r border-slate-800 print:border-slate-200 text-[11px] text-slate-400">
+                            {rec.responsavelLancamento || 'Encarregado de Campo'}
+                          </td>
+                          <td className="p-2 text-[10px] text-slate-400 truncate max-w-xs">
+                            {rec.observacoes || '-'}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-900 print:bg-slate-200 font-bold border-t-2 border-slate-600">
+                      <td colSpan={6} className="p-2.5 text-right border-r border-slate-700 uppercase">TOTAL DE APONTAMENTOS DIÁRIOS:</td>
+                      <td colSpan={3} className="p-2.5 font-mono text-amber-400 print:text-amber-800">
+                        {periodInsalubrityRecords.length} lançamentos de serviços em campo
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ========================================================= */}
+        {/* RELATÓRIO 2: INSALUBRIDADE - MODO AVANÇADO (NR-15 COM %)  */}
+        {/* ========================================================= */}
+        {reportType === 'INSALUBRIDADE' && insalubritySubMode === 'AVANCADO' && (
           <div className="space-y-6">
             {/* Resumo Sintético do Período */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 print:grid-cols-4">
               <div className={`p-3 rounded-xl border text-center ${isDark ? 'bg-[#0D0F14] border-[#1F2229]' : 'bg-slate-50 border-slate-200'}`}>
                 <span className="text-[10px] text-slate-400 block font-bold">COLABORADORES COM FIXO</span>
-                <span className="text-lg font-black text-amber-400 print:text-amber-700">{totalInsalubridade.totalFixoComAdicional}</span>
+                <span className="text-lg font-black text-amber-400 print:text-amber-700">{totalInsalubridadeAdvanced.totalFixoComAdicional}</span>
               </div>
               <div className={`p-3 rounded-xl border text-center ${isDark ? 'bg-[#0D0F14] border-[#1F2229]' : 'bg-slate-50 border-slate-200'}`}>
                 <span className="text-[10px] text-slate-400 block font-bold">HORAS EXPOSTAS 40% (MÁXIMO)</span>
-                <span className="text-lg font-black text-red-400 print:text-red-700">{totalInsalubridade.totalHoras40.toFixed(1)}h</span>
+                <span className="text-lg font-black text-red-400 print:text-red-700">{totalInsalubridadeAdvanced.totalHoras40.toFixed(1)}h</span>
               </div>
               <div className={`p-3 rounded-xl border text-center ${isDark ? 'bg-[#0D0F14] border-[#1F2229]' : 'bg-slate-50 border-slate-200'}`}>
                 <span className="text-[10px] text-slate-400 block font-bold">HORAS EXPOSTAS 20% (MÉDIO)</span>
-                <span className="text-lg font-black text-amber-400 print:text-amber-700">{totalInsalubridade.totalHoras20.toFixed(1)}h</span>
+                <span className="text-lg font-black text-amber-400 print:text-amber-700">{totalInsalubridadeAdvanced.totalHoras20.toFixed(1)}h</span>
               </div>
               <div className={`p-3 rounded-xl border text-center ${isDark ? 'bg-[#0D0F14] border-[#1F2229]' : 'bg-slate-50 border-slate-200'}`}>
                 <span className="text-[10px] text-slate-400 block font-bold">TOTAL APONTAMENTOS CANTEIRO</span>
-                <span className="text-lg font-black text-purple-400 print:text-purple-700">{totalInsalubridade.totalApontamentos}</span>
+                <span className="text-lg font-black text-purple-400 print:text-purple-700">{totalInsalubridadeAdvanced.totalApontamentos}</span>
               </div>
             </div>
 
-            {/* Tabela de Insalubridade */}
+            {/* Tabela de Insalubridade Avançada */}
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse border border-slate-700 print:border-slate-300">
                 <thead>
@@ -853,14 +1276,14 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800 print:divide-slate-200">
-                  {insalubridadeData.length === 0 ? (
+                  {insalubridadeAdvancedData.length === 0 ? (
                     <tr>
                       <td colSpan={11} className="p-6 text-center text-slate-500">
                         Nenhum colaborador localizado para o relatório de insalubridade.
                       </td>
                     </tr>
                   ) : (
-                    insalubridadeData.map((item) => (
+                    insalubridadeAdvancedData.map((item) => (
                       <tr key={item.matricula} className="hover:bg-slate-800/30 print:hover:bg-transparent">
                         <td className="p-2 border-r border-slate-800 print:border-slate-200 font-bold whitespace-nowrap">{item.matricula}</td>
                         <td className="p-2 border-r border-slate-800 print:border-slate-200 font-medium whitespace-nowrap">{item.nome}</td>
@@ -895,13 +1318,13 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
                 <tfoot>
                   <tr className="bg-slate-900 print:bg-slate-200 font-bold border-t-2 border-slate-600">
                     <td colSpan={4} className="p-2.5 text-right border-r border-slate-700 uppercase">TOTAIS APONTADOS:</td>
-                    <td className="p-2.5 text-center border-r border-slate-700 font-mono">{totalInsalubridade.totalFixoComAdicional} com adicional</td>
-                    <td className="p-2.5 text-right border-r border-slate-700 font-mono text-red-400 print:text-red-800">{totalInsalubridade.totalHoras40.toFixed(1)}h</td>
-                    <td className="p-2.5 text-right border-r border-slate-700 font-mono text-amber-400 print:text-amber-800">{totalInsalubridade.totalHoras20.toFixed(1)}h</td>
-                    <td className="p-2.5 text-right border-r border-slate-700 font-mono text-blue-400 print:text-blue-800">{totalInsalubridade.totalHoras10.toFixed(1)}h</td>
-                    <td className="p-2.5 text-right border-r border-slate-700 font-mono font-black">{totalInsalubridade.totalHorasGeral.toFixed(1)}h</td>
-                    <td className="p-2.5 text-center border-r border-slate-700 font-mono">{totalInsalubridade.totalDiasGeral}d</td>
-                    <td className="p-2.5 text-slate-400 print:text-slate-600 text-[10px]">{totalInsalubridade.totalApontamentos} eventos registrados</td>
+                    <td className="p-2.5 text-center border-r border-slate-700 font-mono">{totalInsalubridadeAdvanced.totalFixoComAdicional} com adicional</td>
+                    <td className="p-2.5 text-right border-r border-slate-700 font-mono text-red-400 print:text-red-800">{totalInsalubridadeAdvanced.totalHoras40.toFixed(1)}h</td>
+                    <td className="p-2.5 text-right border-r border-slate-700 font-mono text-amber-400 print:text-amber-800">{totalInsalubridadeAdvanced.totalHoras20.toFixed(1)}h</td>
+                    <td className="p-2.5 text-right border-r border-slate-700 font-mono text-blue-400 print:text-blue-800">{totalInsalubridadeAdvanced.totalHoras10.toFixed(1)}h</td>
+                    <td className="p-2.5 text-right border-r border-slate-700 font-mono font-black">{totalInsalubridadeAdvanced.totalHorasGeral.toFixed(1)}h</td>
+                    <td className="p-2.5 text-center border-r border-slate-700 font-mono">{totalInsalubridadeAdvanced.totalDiasGeral}d</td>
+                    <td className="p-2.5 text-slate-400 print:text-slate-600 text-[10px]">{totalInsalubridadeAdvanced.totalApontamentos} eventos registrados</td>
                   </tr>
                 </tfoot>
               </table>
@@ -923,6 +1346,25 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Modal de Conversão Simples -> Avançado */}
+      {isConversionModalOpen && onSaveInsalubrityBatch && (
+        <InsalubrityConversionModal
+          isOpen={isConversionModalOpen}
+          onClose={() => setIsConversionModalOpen(false)}
+          insalubrityRecords={insalubrityRecords}
+          employees={employees}
+          currentUserEmail={currentUserEmail}
+          userRole={userRole}
+          theme={theme}
+          onSaveConvertedBatch={async (updated) => {
+            await onSaveInsalubrityBatch(updated);
+          }}
+          onSwitchToAdvancedView={() => {
+            setInsalubritySubMode('AVANCADO');
+          }}
+        />
+      )}
     </div>
   );
 };

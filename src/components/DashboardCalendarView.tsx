@@ -23,8 +23,10 @@ interface DashboardCalendarViewProps {
   employees: Employee[];
   records: TimeRecord[];
   onOpenNewEntryModal: (matricula?: string, date?: string) => void;
+  onOpenEditEntryModal?: (record: TimeRecord) => void;
   onViewEmployeeStatement: (matricula: string) => void;
   onOpenQuickBatchModal?: () => void;
+  onDeleteRecord?: (id: string) => void | Promise<void>;
   theme?: 'dark' | 'light';
 }
 
@@ -63,8 +65,10 @@ export const DashboardCalendarView: React.FC<DashboardCalendarViewProps> = ({
   employees,
   records,
   onOpenNewEntryModal,
+  onOpenEditEntryModal,
   onViewEmployeeStatement,
   onOpenQuickBatchModal,
+  onDeleteRecord,
   theme = 'dark',
 }) => {
   const isDark = theme === 'dark';
@@ -259,84 +263,107 @@ export const DashboardCalendarView: React.FC<DashboardCalendarViewProps> = ({
       else if (rec.tipoOcorrencia === 'COMPENSACAO' || rec.tipoOcorrencia === 'DISPENSA_OPERACIONAL') saldo = -(horasBrutas > 0 ? horasBrutas : 8.0);
     }
 
+    const handleClickPill = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (onOpenEditEntryModal) {
+        onOpenEditEntryModal(rec);
+      } else {
+        const d = normalizeRecDate(rec);
+        onOpenNewEntryModal(rec.matricula, d);
+      }
+    };
+
     switch (rec.tipoOcorrencia) {
       case 'TRABALHO': {
         const isPositive = saldo > 0;
         return (
-          <span
+          <button
             key={itemKey}
-            title={`Trabalho / HE: ${horasBrutas}h brutas (${mult}x = ${saldo > 0 ? '+' : ''}${saldo.toFixed(1)}h)${rec.observacao ? ` • ${rec.observacao}` : ''}`}
-            className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold leading-tight shadow-2xs whitespace-nowrap ${
+            type="button"
+            onClick={handleClickPill}
+            title={`Clique para editar: Trabalho / HE ${horasBrutas}h brutas (${mult}x = ${saldo > 0 ? '+' : ''}${saldo.toFixed(1)}h)${rec.observacao ? ` • ${rec.observacao}` : ''}`}
+            className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold leading-tight shadow-2xs whitespace-nowrap cursor-pointer transition-all hover:scale-105 ${
               isPositive
                 ? isDark
-                  ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 hover:bg-emerald-900/80'
+                  ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60 hover:bg-emerald-800 hover:text-white'
                   : 'bg-emerald-100 text-emerald-800 border border-emerald-300 hover:bg-emerald-200'
                 : isDark
-                ? 'bg-blue-950/80 text-blue-300 border border-blue-700/60'
-                : 'bg-blue-100 text-blue-800 border border-blue-300'
+                ? 'bg-blue-950/80 text-blue-300 border border-blue-700/60 hover:bg-blue-800 hover:text-white'
+                : 'bg-blue-100 text-blue-800 border border-blue-300 hover:bg-blue-200'
             }`}
           >
             {saldo > 0 ? `+${saldo.toFixed(1)}h` : `${horasBrutas}h`}
-          </span>
+          </button>
         );
       }
       case 'ATESTADO_MEDICO':
         return (
-          <span
+          <button
             key={itemKey}
-            title={`Atestado Médico (Neutro 0h)${rec.observacao ? ` • ${rec.observacao}` : ''}`}
-            className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold leading-tight ${
-              isDark ? 'bg-amber-950/80 text-amber-300 border border-amber-700/60' : 'bg-amber-100 text-amber-800 border border-amber-300'
+            type="button"
+            onClick={handleClickPill}
+            title={`Clique para editar: Atestado Médico (Neutro 0h)${rec.observacao ? ` • ${rec.observacao}` : ''}`}
+            className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold leading-tight cursor-pointer transition-all hover:scale-105 ${
+              isDark ? 'bg-amber-950/80 text-amber-300 border border-amber-700/60 hover:bg-amber-800 hover:text-white' : 'bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200'
             }`}
           >
             AT (0h)
-          </span>
+          </button>
         );
       case 'FALTA_INJUSTIFICADA':
         return (
-          <span
+          <button
             key={itemKey}
-            title={`Falta Injustificada (-8.0h / Desconto)${rec.observacao ? ` • ${rec.observacao}` : ''}`}
-            className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold leading-tight ${
-              isDark ? 'bg-rose-950/80 text-rose-300 border border-rose-700/60' : 'bg-rose-100 text-rose-800 border border-rose-300'
+            type="button"
+            onClick={handleClickPill}
+            title={`Clique para editar: Falta Injustificada (-8.0h / Desconto)${rec.observacao ? ` • ${rec.observacao}` : ''}`}
+            className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold leading-tight cursor-pointer transition-all hover:scale-105 ${
+              isDark ? 'bg-rose-950/80 text-rose-300 border border-rose-700/60 hover:bg-rose-800 hover:text-white' : 'bg-rose-100 text-rose-800 border border-rose-300 hover:bg-rose-200'
             }`}
           >
             -8.0h
-          </span>
+          </button>
         );
       case 'FERIAS':
         return (
-          <span
+          <button
             key={itemKey}
-            title="Férias Regulamentares"
-            className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold leading-tight ${
-              isDark ? 'bg-cyan-950/80 text-cyan-300 border border-cyan-700/60' : 'bg-cyan-100 text-cyan-800 border border-cyan-300'
+            type="button"
+            onClick={handleClickPill}
+            title="Clique para editar: Férias Regulamentares"
+            className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold leading-tight cursor-pointer transition-all hover:scale-105 ${
+              isDark ? 'bg-cyan-950/80 text-cyan-300 border border-cyan-700/60 hover:bg-cyan-800 hover:text-white' : 'bg-cyan-100 text-cyan-800 border border-cyan-300 hover:bg-cyan-200'
             }`}
           >
             FÉRIAS
-          </span>
+          </button>
         );
       case 'COMPENSACAO':
       case 'DISPENSA_OPERACIONAL':
         return (
-          <span
+          <button
             key={itemKey}
-            title={`Folga / Compensação (${saldo.toFixed(1)}h)${rec.observacao ? ` • ${rec.observacao}` : ''}`}
-            className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold leading-tight ${
-              isDark ? 'bg-purple-950/80 text-purple-300 border border-purple-700/60' : 'bg-purple-100 text-purple-800 border border-purple-300'
+            type="button"
+            onClick={handleClickPill}
+            title={`Clique para editar: Folga / Compensação (${saldo.toFixed(1)}h)${rec.observacao ? ` • ${rec.observacao}` : ''}`}
+            className={`inline-flex items-center justify-center px-1.5 py-0.5 rounded-md text-[10px] font-mono font-bold leading-tight cursor-pointer transition-all hover:scale-105 ${
+              isDark ? 'bg-purple-950/80 text-purple-300 border border-purple-700/60 hover:bg-purple-800 hover:text-white' : 'bg-purple-100 text-purple-800 border border-purple-300 hover:bg-purple-200'
             }`}
           >
             {saldo < 0 ? `${saldo.toFixed(1)}h` : 'COMP'}
-          </span>
+          </button>
         );
       default:
         return (
-          <span
+          <button
             key={itemKey}
-            className="inline-flex items-center justify-center px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-gray-500/20 text-gray-400"
+            type="button"
+            onClick={handleClickPill}
+            title={`Clique para editar: ${horasBrutas}h`}
+            className="inline-flex items-center justify-center px-1.5 py-0.5 rounded-md text-[10px] font-mono bg-gray-500/20 text-gray-400 cursor-pointer hover:bg-gray-500/40"
           >
             {horasBrutas}h
-          </span>
+          </button>
         );
     }
   };
@@ -702,7 +729,13 @@ export const DashboardCalendarView: React.FC<DashboardCalendarViewProps> = ({
                       return (
                         <td
                           key={`cell_${cleanMat}_${day.dateIso}`}
-                          onClick={() => onOpenNewEntryModal(emp.matricula, day.dateIso)}
+                          onClick={() => {
+                            if (dayRecords.length > 0 && onOpenEditEntryModal) {
+                              onOpenEditEntryModal(dayRecords[0]);
+                            } else {
+                              onOpenNewEntryModal(emp.matricula, day.dateIso);
+                            }
+                          }}
                           className={`p-1.5 text-center border-l transition-all cursor-pointer group align-middle ${
                             day.isToday
                               ? 'bg-blue-500/5'
@@ -712,7 +745,11 @@ export const DashboardCalendarView: React.FC<DashboardCalendarViewProps> = ({
                               ? isDark ? 'bg-amber-950/5' : 'bg-amber-50/40'
                               : ''
                           } ${isDark ? 'border-[#1F2229] hover:bg-blue-500/10' : 'border-gray-200 hover:bg-blue-50'}`}
-                          title={`Clique para lançar horas em ${day.dateIso} para ${emp.nome}`}
+                          title={
+                            dayRecords.length > 0
+                              ? `Clique para editar o lançamento de ${emp.nome} em ${day.dateIso}`
+                              : `Clique para lançar horas em ${day.dateIso} para ${emp.nome}`
+                          }
                         >
                           {dayRecords.length > 0 ? (
                             <div className="flex flex-col items-center justify-center gap-0.5">

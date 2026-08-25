@@ -2,7 +2,7 @@ import React from 'react';
 import { Info, HelpCircle } from 'lucide-react';
 
 interface InfoTooltipProps {
-  content: string;
+  content: React.ReactNode;
   className?: string;
   theme?: 'dark' | 'light';
   size?: 'sm' | 'md';
@@ -51,10 +51,10 @@ export const InfoTooltip: React.FC<InfoTooltipProps> = ({
 
       {/* Popover Tooltip */}
       <div 
-        className={`absolute z-50 pointer-events-none opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200 w-64 p-2.5 text-[11px] leading-relaxed rounded-xl shadow-xl border font-sans ${positionClasses[position]} ${
+        className={`absolute z-50 pointer-events-none opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-200 w-72 max-w-xs p-2.5 text-[11px] leading-relaxed rounded-xl shadow-xl border font-sans ${positionClasses[position]} ${
           isDark 
-            ? 'bg-[#181B22] text-[#D1D5DB] border-[#2E3340] shadow-black/60' 
-            : 'bg-white text-gray-700 border-gray-200 shadow-gray-300/80'
+            ? 'bg-[#181B22] text-[#D1D5DB] border-[#2E3340] shadow-black/80' 
+            : 'bg-white text-slate-700 border-slate-200 shadow-slate-300/80'
         }`}
       >
         <div className="flex items-start gap-2">
@@ -65,3 +65,4 @@ export const InfoTooltip: React.FC<InfoTooltipProps> = ({
     </div>
   );
 };
+

@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { Employee, Branch, InsalubrityRecord, GrauInsalubridade, SystemConfig, ConstructionSite } from '../types';
+import { Employee, Branch, InsalubrityRecord, GrauInsalubridade, SystemConfig, ConstructionSite, AdminRole } from '../types';
 import { InsalubritySimpleMatrixView } from './InsalubritySimpleMatrixView';
+import { InsalubrityConversionModal } from './InsalubrityConversionModal';
 import { 
   AlertTriangle, 
   ShieldAlert, 
@@ -8,6 +9,7 @@ import {
   Search, 
   Filter, 
   Trash2, 
+  Pencil,
   FileText, 
   CheckCircle2, 
   AlertCircle, 
@@ -18,17 +20,18 @@ import {
   HardHat, 
   Activity, 
   Sparkles, 
-  Info,
-  X,
-  FileSpreadsheet,
-  Download,
-  Flame,
-  Droplets,
-  Layers,
-  HelpCircle,
-  TrendingUp,
-  Settings2,
-  Table
+  Info, 
+  X, 
+  FileSpreadsheet, 
+  Download, 
+  Flame, 
+  Droplets, 
+  Layers, 
+  HelpCircle, 
+  TrendingUp, 
+  Settings2, 
+  Table,
+  ArrowRightLeft
 } from 'lucide-react';
 
 interface InsalubrityManagementProps {
@@ -43,6 +46,7 @@ interface InsalubrityManagementProps {
   onUpdateSystemConfig?: (cfg: SystemConfig) => Promise<void>;
   constructionSites?: ConstructionSite[];
   currentUserEmail?: string;
+  userRole?: string;
   theme?: 'dark' | 'light';
 }
 
@@ -69,17 +73,26 @@ export const InsalubrityManagement: React.FC<InsalubrityManagementProps> = ({
   onUpdateSystemConfig,
   constructionSites = [],
   currentUserEmail = 'coari.comara@gmail.com',
+  userRole,
   theme = 'dark',
 }) => {
   const isDark = theme === 'dark';
+  const isAuxDA = userRole === 'AUX_DA' || userRole === 'AUXILIAR_DA';
 
   // Modo de visualização: 'SIMPLES' (Matriz Planilha) vs 'COMPLETA' (Apontamentos e Fichas)
   const [currentMode, setCurrentMode] = useState<'SIMPLES' | 'COMPLETA'>(
-    systemConfig?.insalubrityMode || 'SIMPLES'
+    isAuxDA ? 'SIMPLES' : (systemConfig?.insalubrityMode || 'SIMPLES')
   );
+
+  React.useEffect(() => {
+    if (isAuxDA && currentMode !== 'SIMPLES') {
+      setCurrentMode('SIMPLES');
+    }
+  }, [isAuxDA, currentMode]);
 
   // Sub-view no Modo Completo: 'ATIVIDADES' | 'FIXA' | 'GUIA_NR15'
   const [activeSubTab, setActiveSubTab] = useState<'ATIVIDADES' | 'FIXA' | 'GUIA_NR15'>('ATIVIDADES');
+  const [isConversionModalOpen, setIsConversionModalOpen] = useState(false);
 
   const handleToggleMode = async (newMode: 'SIMPLES' | 'COMPLETA') => {
     setCurrentMode(newMode);
@@ -102,8 +115,9 @@ export const InsalubrityManagement: React.FC<InsalubrityManagementProps> = ({
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  // Modal: Novo Lançamento de Atividade
+  // Modal: Novo / Editar Lançamento de Atividade
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<InsalubrityRecord | null>(null);
   const [formMatricula, setFormMatricula] = useState('');
   const [formDataEvento, setFormDataEvento] = useState(new Date().toISOString().split('T')[0]);
   const [formAtividade, setFormAtividade] = useState('');
@@ -114,6 +128,34 @@ export const InsalubrityManagement: React.FC<InsalubrityManagementProps> = ({
   const [formObservacoes, setFormObservacoes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formFeedback, setFormFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const handleOpenNewModal = () => {
+    setEditingRecord(null);
+    setFormMatricula('');
+    setFormDataEvento(new Date().toISOString().split('T')[0]);
+    setFormAtividade('');
+    setFormGrau('20%');
+    setFormQuantidade(8);
+    setFormUnidade('HORAS');
+    setFormResponsavel('Encarregado de Campo');
+    setFormObservacoes('');
+    setFormFeedback(null);
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEditModal = (rec: InsalubrityRecord) => {
+    setEditingRecord(rec);
+    setFormMatricula(rec.matricula);
+    setFormDataEvento(rec.dataEvento || new Date().toISOString().split('T')[0]);
+    setFormAtividade(rec.atividadeDesempenhada || '');
+    setFormGrau((rec.grauExposicao as any) || '20%');
+    setFormQuantidade(Number(rec.quantidadeHorasDias) || 8);
+    setFormUnidade(rec.unidade || 'HORAS');
+    setFormResponsavel(rec.responsavelLancamento || 'Encarregado de Campo');
+    setFormObservacoes(rec.observacoes || '');
+    setFormFeedback(null);
+    setIsModalOpen(true);
+  };
 
   // Selected Employee Helper for Form
   const selectedEmployeeInForm = useMemo(() => {
@@ -204,8 +246,8 @@ export const InsalubrityManagement: React.FC<InsalubrityManagementProps> = ({
 
     setIsSubmitting(true);
     try {
-      const newRec: InsalubrityRecord = {
-        id: `ins-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      const recToSave: InsalubrityRecord = {
+        id: editingRecord ? editingRecord.id : `ins-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         matricula: selectedEmployeeInForm.matricula,
         nomeColaborador: selectedEmployeeInForm.nome,
         sede: selectedEmployeeInForm.sede_atual || selectedEmployeeInForm.sede || 'KO',
@@ -217,14 +259,21 @@ export const InsalubrityManagement: React.FC<InsalubrityManagementProps> = ({
         unidade: formUnidade,
         responsavelLancamento: formResponsavel.trim() || 'Encarregado de Campo',
         observacoes: formObservacoes.trim(),
-        criadoEm: new Date().toISOString(),
-        criadoPorEmail: currentUserEmail,
+        criadoEm: editingRecord ? editingRecord.criadoEm : new Date().toISOString(),
+        criadoPorEmail: editingRecord ? editingRecord.criadoPorEmail : currentUserEmail,
+        ...(editingRecord ? { atualizadoEm: new Date().toISOString(), atualizadoPorEmail: currentUserEmail } : {})
       };
 
-      await onSaveRecord(newRec);
-      setFormFeedback({ type: 'success', text: 'Atividade insalubre lançada com sucesso no Firestore!' });
+      await onSaveRecord(recToSave);
+      setFormFeedback({
+        type: 'success',
+        text: editingRecord
+          ? 'Lançamento de insalubridade corrigido e atualizado com sucesso!'
+          : 'Atividade insalubre lançada com sucesso no Firestore!'
+      });
       setTimeout(() => {
         setIsModalOpen(false);
+        setEditingRecord(null);
         setFormAtividade('');
         setFormObservacoes('');
         setFormFeedback(null);
@@ -280,44 +329,57 @@ export const InsalubrityManagement: React.FC<InsalubrityManagementProps> = ({
       {/* ------------------------------------------------------------- */}
       {/* SELETOR PRINCIPAL DE MODO: SIMPLES (PLANILHA) vs COMPLETO     */}
       {/* ------------------------------------------------------------- */}
-      <div className={`p-2.5 rounded-2xl border flex items-center justify-between gap-3 flex-wrap ${
-        isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200'
-      }`}>
-        <div className="flex items-center gap-1.5 p-1 rounded-xl bg-black/10 dark:bg-black/40 border border-black/5 dark:border-white/5">
-          <button
-            onClick={() => handleToggleMode('SIMPLES')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-              currentMode === 'SIMPLES'
-                ? 'bg-amber-600 text-white shadow-sm'
-                : isDark ? 'text-gray-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Table className="w-3.5 h-3.5" />
-            <span>Modo Simples (Matriz Planilha Mensal)</span>
-          </button>
+      {!isAuxDA && (
+        <div className={`p-2.5 rounded-2xl border flex items-center justify-between gap-3 flex-wrap ${
+          isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200'
+        }`}>
+          <div className="flex items-center gap-1.5 p-1 rounded-xl bg-black/10 dark:bg-black/40 border border-black/5 dark:border-white/5">
+            <button
+              onClick={() => handleToggleMode('SIMPLES')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                currentMode === 'SIMPLES'
+                  ? 'bg-amber-600 text-white shadow-sm'
+                  : isDark ? 'text-gray-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Table className="w-3.5 h-3.5" />
+              <span>Modo Simples (Matriz Planilha Mensal)</span>
+            </button>
 
-          <button
-            onClick={() => handleToggleMode('COMPLETA')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-              currentMode === 'COMPLETA'
-                ? 'bg-blue-600 text-white shadow-sm'
-                : isDark ? 'text-gray-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span>Modo Completo (Apontamentos & Ficha Fixa)</span>
-          </button>
-        </div>
+            <button
+              onClick={() => handleToggleMode('COMPLETA')}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                currentMode === 'COMPLETA'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : isDark ? 'text-gray-400 hover:text-white' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>Modo Completo (Apontamentos & Ficha Fixa)</span>
+            </button>
+          </div>
 
-        <div className="flex items-center gap-2 text-xs">
-          <span className={`text-[11px] font-mono ${isDark ? 'text-gray-400' : 'text-slate-500'}`}>
-            Modo Atual: <strong>{currentMode === 'SIMPLES' ? 'Planilha de Efetivo Mensal' : 'Auditoria NR-15'}</strong>
-          </span>
+          <div className="flex items-center gap-2 text-xs">
+            {onSaveBatchRecords && (userRole === 'SUPER_ADMIN' || userRole === 'GESTOR_RH' || userRole === 'GERENTE_CAMPO' || userRole === 'ADMIN') && (
+              <button
+                onClick={() => setIsConversionModalOpen(true)}
+                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-600 to-blue-600 hover:from-amber-500 hover:to-blue-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-98"
+                title="Converter lançamentos de campo do modo simples para enquadramento oficial NR-15"
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5" />
+                <span>Converter Simples → NR-15</span>
+              </button>
+            )}
+
+            <span className={`text-[11px] font-mono ${isDark ? 'text-gray-400' : 'text-slate-500'}`}>
+              Modo Atual: <strong>{currentMode === 'SIMPLES' ? 'Planilha de Efetivo Mensal' : 'Auditoria NR-15'}</strong>
+            </span>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* RENDERIZAÇÃO CONDICIONAL POR MODO */}
-      {currentMode === 'SIMPLES' ? (
+      {currentMode === 'SIMPLES' || isAuxDA ? (
         <InsalubritySimpleMatrixView
           employees={employees}
           insalubrityRecords={insalubrityRecords}
@@ -326,8 +388,11 @@ export const InsalubrityManagement: React.FC<InsalubrityManagementProps> = ({
           onDeleteRecord={onDeleteRecord}
           constructionSites={constructionSites}
           currentUserEmail={currentUserEmail}
+          userRole={userRole as AdminRole}
           theme={theme}
-          onSwitchToCompleteMode={() => handleToggleMode('COMPLETA')}
+          onSwitchToCompleteMode={isAuxDA ? undefined : () => handleToggleMode('COMPLETA')}
+          onOpenConversionModal={() => setIsConversionModalOpen(true)}
+          onNavigateToReports={onNavigateToReports}
         />
       ) : (
         <>
@@ -377,7 +442,7 @@ export const InsalubrityManagement: React.FC<InsalubrityManagementProps> = ({
               )}
 
               <button
-                onClick={() => setIsModalOpen(true)}
+                onClick={handleOpenNewModal}
                 className="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-2 transition-all shadow-md shadow-amber-600/20 active:scale-98 cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
@@ -710,15 +775,26 @@ export const InsalubrityManagement: React.FC<InsalubrityManagementProps> = ({
                           {rec.responsavelLancamento}
                         </td>
                         <td className="p-3.5 text-center">
-                          <button
-                            onClick={() => handleDelete(rec.id, rec.nomeColaborador)}
-                            title="Excluir lançamento"
-                            className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
-                              isDark ? 'text-red-400 hover:bg-red-500/10' : 'text-red-600 hover:bg-red-50'
-                            }`}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => handleOpenEditModal(rec)}
+                              title="Editar / Corrigir lançamento de insalubridade"
+                              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                isDark ? 'text-amber-400 hover:bg-amber-500/10' : 'text-amber-600 hover:bg-amber-50'
+                              }`}
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(rec.id, rec.nomeColaborador)}
+                              title="Excluir lançamento"
+                              className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                isDark ? 'text-red-400 hover:bg-red-500/10' : 'text-red-600 hover:bg-red-50'
+                              }`}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -889,9 +965,11 @@ export const InsalubrityManagement: React.FC<InsalubrityManagementProps> = ({
                   <HardHat className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-sm">Apontamento de Atividade Insalubre</h3>
+                  <h3 className="font-bold text-sm">
+                    {editingRecord ? 'Editar Apontamento de Atividade Insalubre' : 'Apontamento de Atividade Insalubre'}
+                  </h3>
                   <p className={`text-[11px] ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
-                    Lançamento pontual por demanda / serviço especial
+                    {editingRecord ? `Correção do registro ID #${editingRecord.id}` : 'Lançamento pontual por demanda / serviço especial'}
                   </p>
                 </div>
               </div>
@@ -1117,7 +1195,7 @@ export const InsalubrityManagement: React.FC<InsalubrityManagementProps> = ({
                   disabled={isSubmitting}
                   className="px-6 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold transition-all shadow-md shadow-amber-600/20 active:scale-98 cursor-pointer disabled:opacity-50"
                 >
-                  {isSubmitting ? 'Gravando...' : 'Salvar Apontamento'}
+                  {isSubmitting ? 'Gravando...' : editingRecord ? 'Salvar Alterações' : 'Confirmar Lançamento'}
                 </button>
               </div>
             </form>
@@ -1125,6 +1203,24 @@ export const InsalubrityManagement: React.FC<InsalubrityManagementProps> = ({
         </div>
       )}
         </>
+      )}
+      {/* Modal de Conversão Simples -> Avançado */}
+      {isConversionModalOpen && onSaveBatchRecords && (
+        <InsalubrityConversionModal
+          isOpen={isConversionModalOpen}
+          onClose={() => setIsConversionModalOpen(false)}
+          insalubrityRecords={insalubrityRecords}
+          employees={employees}
+          currentUserEmail={currentUserEmail}
+          userRole={userRole as AdminRole}
+          theme={theme}
+          onSaveConvertedBatch={async (updatedList) => {
+            await onSaveBatchRecords(updatedList);
+          }}
+          onSwitchToAdvancedView={() => {
+            setCurrentMode('COMPLETA');
+          }}
+        />
       )}
     </div>
   );

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { SystemConfig } from '../types';
+import { SystemConfig, AdminRole } from '../types';
 import { ComaraLogo } from './ComaraLogo';
 import { 
   BarChart3, 
@@ -27,7 +27,9 @@ import {
   Cloud,
   HardHat,
   Building2,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Clock,
+  CalendarCheck2
 } from 'lucide-react';
 
 export type ActiveTab = 'dashboard' | 'colaboradores' | 'canteiros' | 'insalubridade' | 'relatorios' | 'extrato' | 'portal_colaborador' | 'permissoes_admin' | 'arquitetura';
@@ -48,8 +50,9 @@ interface NavbarProps {
   onToggleTheme: () => void;
   userMode: UserMode;
   onToggleUserMode: (mode: UserMode) => void;
+  onSelectRole?: (role: AdminRole) => void;
   currentUserEmail: string;
-  userRole?: 'SUPER_ADMIN' | 'GESTOR_RH' | 'AUDITOR' | 'CHEFE_CANTEIRO' | 'ROLE_GERENTE' | 'GERENTE_CAMPO' | string;
+  userRole?: AdminRole | string;
   onSignOut?: () => void;
 }
 
@@ -68,23 +71,30 @@ export const Navbar: React.FC<NavbarProps> = ({
   onToggleTheme,
   userMode,
   onToggleUserMode,
+  onSelectRole,
   currentUserEmail,
   userRole = 'SUPER_ADMIN',
   onSignOut,
 }) => {
   const isDark = theme === 'dark';
   const isAdmin = userMode === 'ADMIN';
+  const isAuxDA = userRole === 'AUX_DA' || (userRole as string) === 'AUXILIAR_DA';
 
   // Dropdown states
+  const [isLaunchDropdownOpen, setIsLaunchDropdownOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
+  const launchMenuRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
 
   // Close dropdowns on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      if (launchMenuRef.current && !launchMenuRef.current.contains(event.target as Node)) {
+        setIsLaunchDropdownOpen(false);
+      }
       if (settingsRef.current && !settingsRef.current.contains(event.target as Node)) {
         setIsSettingsOpen(false);
       }
@@ -214,15 +224,126 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* ========================================================= */}
           <div className="flex items-center space-x-2 shrink-0">
             
-            {/* BOTÃO PRIMÁRIO ÚNICO: LANÇAMENTO (LOTE) */}
-            <button
-              onClick={onOpenQuickBatchModal}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-[#3B82F6] hover:bg-blue-600 rounded-xl transition-all shadow-md shadow-blue-500/20 active:scale-98 cursor-pointer"
-              title="Lançamento Rápido Diário ou em Lote"
-            >
-              <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-              <span>Lançamento</span>
-            </button>
+            {/* BOTÃO PRIMÁRIO: LANÇAMENTO COM MENU DE OPÇÕES (HORAS OU INSALUBRIDADE) */}
+            <div className="relative" ref={launchMenuRef}>
+              <button
+                onClick={() => {
+                  setIsLaunchDropdownOpen(!isLaunchDropdownOpen);
+                  setIsSettingsOpen(false);
+                  setIsProfileOpen(false);
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-white bg-[#3B82F6] hover:bg-blue-600 rounded-xl transition-all shadow-md shadow-blue-500/20 active:scale-98 cursor-pointer"
+                title="Lançamento (Horas ou Insalubridade)"
+                aria-expanded={isLaunchDropdownOpen}
+              >
+                <Plus className={`w-3.5 h-3.5 stroke-[2.5] transition-transform duration-200 ${isLaunchDropdownOpen ? 'rotate-45' : ''}`} />
+                <span>Lançamento</span>
+                <ChevronDown className={`w-3 h-3 transition-transform duration-200 ${isLaunchDropdownOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {/* Menu Suspenso de Opções de Lançamento */}
+              {isLaunchDropdownOpen && (
+                <div className={`absolute right-0 mt-2 w-80 rounded-2xl shadow-2xl border py-1.5 z-50 animate-in fade-in zoom-in-95 duration-150 ${
+                  isDark ? 'bg-[#15171C] border-[#1F2229] text-[#E0E2E5]' : 'bg-white border-slate-200 text-slate-800'
+                }`}>
+                  <div className={`px-3.5 py-1.5 border-b text-[10px] uppercase font-bold tracking-wider ${
+                    isDark ? 'border-[#1F2229] text-[#8E9299]' : 'border-slate-100 text-slate-500'
+                  }`}>
+                    Selecione o Lançamento
+                  </div>
+
+                  {/* 1. Opção: Lançamento de Horas (Lote / Rápido) */}
+                  <div className="p-1 space-y-0.5">
+                    <button
+                      onClick={() => {
+                        setIsLaunchDropdownOpen(false);
+                        onOpenQuickBatchModal();
+                      }}
+                      className={`w-full px-3 py-2.5 text-xs text-left flex items-start gap-2.5 rounded-xl transition-colors cursor-pointer ${
+                        isDark ? 'hover:bg-[#1F2229] text-[#E0E2E5]' : 'hover:bg-blue-50/70 text-slate-800'
+                      }`}
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center shrink-0 border border-blue-500/20 mt-0.5">
+                        <Clock className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-bold flex items-center justify-between">
+                          <span>Lançamento de Horas</span>
+                          <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${
+                            isDark ? 'bg-blue-500/20 text-blue-300' : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            Lote / Rápido
+                          </span>
+                        </div>
+                        <p className={`text-[11px] mt-0.5 leading-tight ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+                          Horas extras, trabalhos e faltas para múltiplos colaboradores
+                        </p>
+                      </div>
+                    </button>
+
+                    {/* 2. Opção: Lançamento Individual de Horas */}
+                    <button
+                      onClick={() => {
+                        setIsLaunchDropdownOpen(false);
+                        onOpenNewEntry();
+                      }}
+                      className={`w-full px-3 py-2 text-xs text-left flex items-start gap-2.5 rounded-xl transition-colors cursor-pointer ${
+                        isDark ? 'hover:bg-[#1F2229] text-[#E0E2E5]' : 'hover:bg-blue-50/70 text-slate-800'
+                      }`}
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center shrink-0 border border-cyan-500/20 mt-0.5">
+                        <CalendarCheck2 className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold flex items-center justify-between">
+                          <span>Lançamento Individual (Horas)</span>
+                          <span className={`text-[9px] px-1.5 py-0.2 rounded font-semibold ${
+                            isDark ? 'bg-cyan-500/20 text-cyan-300' : 'bg-cyan-100 text-cyan-700'
+                          }`}>
+                            Diário
+                          </span>
+                        </div>
+                        <p className={`text-[11px] mt-0.5 leading-tight ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+                          Lançamento único com anexo de atestado/comprovante
+                        </p>
+                      </div>
+                    </button>
+                  </div>
+
+                  <div className={`my-1 border-t ${isDark ? 'border-[#1F2229]' : 'border-slate-100'}`} />
+
+                  {/* 3. Opção: Lançamento de Insalubridade */}
+                  <div className="p-1">
+                    <button
+                      onClick={() => {
+                        setIsLaunchDropdownOpen(false);
+                        onSelectTab('insalubridade');
+                      }}
+                      className={`w-full px-3 py-2.5 text-xs text-left flex items-start gap-2.5 rounded-xl transition-colors cursor-pointer ${
+                        isDark ? 'hover:bg-[#1F2229] text-[#E0E2E5]' : 'hover:bg-amber-50/70 text-slate-800'
+                      }`}
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/20 mt-0.5">
+                        <HardHat className="w-4 h-4" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-bold flex items-center justify-between">
+                          <span>Lançamento de Insalubridade</span>
+                          <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${
+                            isDark ? 'bg-amber-500/20 text-amber-300' : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            NR-15 / Campo
+                          </span>
+                        </div>
+                        <p className={`text-[11px] mt-0.5 leading-tight ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+                          Planilha mensal de efetivo, atividades e auditoria técnica
+                        </p>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* ALTERNADOR DE TEMA (SOL / LUA) */}
             <button
@@ -272,27 +393,29 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
 
                   {/* 1. Canteiros de Obras */}
-                  <button
-                    onClick={() => {
-                      onSelectTab('canteiros');
-                      setIsSettingsOpen(false);
-                    }}
-                    className={`w-full px-3.5 py-2.5 text-xs text-left flex items-center gap-2.5 transition-colors cursor-pointer ${
-                      activeTab === 'canteiros'
-                        ? isDark ? 'bg-amber-950/30 text-amber-300' : 'bg-amber-50 text-amber-800'
-                        : isDark ? 'hover:bg-[#1F2229] text-[#E0E2E5]' : 'hover:bg-slate-50 text-slate-700'
-                    }`}
-                  >
-                    <div className="w-6 h-6 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/20">
-                      <Building2 className="w-3.5 h-3.5" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="font-semibold">Canteiros de Obras</div>
-                      <span className={`text-[10px] block ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
-                        Cadastro de sedes, chefias e equipes
-                      </span>
-                    </div>
-                  </button>
+                  {!isAuxDA && (
+                    <button
+                      onClick={() => {
+                        onSelectTab('canteiros');
+                        setIsSettingsOpen(false);
+                      }}
+                      className={`w-full px-3.5 py-2.5 text-xs text-left flex items-center gap-2.5 transition-colors cursor-pointer ${
+                        activeTab === 'canteiros'
+                          ? isDark ? 'bg-amber-950/30 text-amber-300' : 'bg-amber-50 text-amber-800'
+                          : isDark ? 'hover:bg-[#1F2229] text-[#E0E2E5]' : 'hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <div className="w-6 h-6 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/20">
+                        <Building2 className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold">Canteiros de Obras</div>
+                        <span className={`text-[10px] block ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+                          Cadastro de sedes, chefias e equipes
+                        </span>
+                      </div>
+                    </button>
+                  )}
 
                   {/* 2. Relatórios */}
                   <button
@@ -317,8 +440,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </div>
                   </button>
 
-                  {/* 3. Configurações do Sistema (Logo & Modo Insalubridade) */}
-                  {onOpenLogoModal && (
+                  {/* 3. Configurações do Sistema (Logo & Modo Insalubridade) - Apenas Administradores */}
+                  {!isAuxDA && onOpenLogoModal && (
                     <button
                       onClick={() => {
                         onOpenLogoModal();
@@ -340,119 +463,129 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </button>
                   )}
 
-                  {/* 4. Gestão de Acessos & Permissões */}
-                  <button
-                    onClick={() => {
-                      onSelectTab('permissoes_admin');
-                      setIsSettingsOpen(false);
-                    }}
-                    className={`w-full px-3.5 py-2.5 text-xs text-left flex items-center gap-2.5 transition-colors cursor-pointer ${
-                      activeTab === 'permissoes_admin'
-                        ? isDark ? 'bg-purple-950/30 text-purple-300' : 'bg-purple-50 text-purple-800'
-                        : isDark ? 'hover:bg-[#1F2229] text-[#E0E2E5]' : 'hover:bg-slate-50 text-slate-700'
-                    }`}
-                  >
-                    <div className="w-6 h-6 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center shrink-0 border border-purple-500/20">
-                      <ShieldCheck className="w-3.5 h-3.5" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="font-semibold flex items-center justify-between">
-                        <span>Gestão de Acessos</span>
-                        {!isAdmin && <Lock className="w-3 h-3 text-amber-400" />}
+                  {/* 4. Gestão de Acessos & Permissões - Apenas Administradores */}
+                  {!isAuxDA && (
+                    <button
+                      onClick={() => {
+                        onSelectTab('permissoes_admin');
+                        setIsSettingsOpen(false);
+                      }}
+                      className={`w-full px-3.5 py-2.5 text-xs text-left flex items-center gap-2.5 transition-colors cursor-pointer ${
+                        activeTab === 'permissoes_admin'
+                          ? isDark ? 'bg-purple-950/30 text-purple-300' : 'bg-purple-50 text-purple-800'
+                          : isDark ? 'hover:bg-[#1F2229] text-[#E0E2E5]' : 'hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <div className="w-6 h-6 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center shrink-0 border border-purple-500/20">
+                        <ShieldCheck className="w-3.5 h-3.5" />
                       </div>
-                      <span className={`text-[10px] block ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
-                        Controle de permissões e administradores
-                      </span>
-                    </div>
-                  </button>
+                      <div className="flex-1">
+                        <div className="font-semibold flex items-center justify-between">
+                          <span>Gestão de Acessos</span>
+                          {!isAdmin && <Lock className="w-3 h-3 text-amber-400" />}
+                        </div>
+                        <span className={`text-[10px] block ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+                          Controle de permissões e administradores
+                        </span>
+                      </div>
+                    </button>
+                  )}
 
-                  <div className={`my-1 border-t ${isDark ? 'border-[#1F2229]' : 'border-slate-100'}`} />
+                  {!isAuxDA && <div className={`my-1 border-t ${isDark ? 'border-[#1F2229]' : 'border-slate-100'}`} />}
 
                   {/* 5. Importar Lançamentos (CSV) */}
-                  <button
-                    onClick={() => {
-                      onOpenImportRecordsModal();
-                      setIsSettingsOpen(false);
-                    }}
-                    className={`w-full px-3.5 py-2.5 text-xs text-left flex items-center gap-2.5 transition-colors cursor-pointer ${
-                      isDark ? 'hover:bg-[#1F2229] text-[#E0E2E5]' : 'hover:bg-slate-50 text-slate-700'
-                    }`}
-                  >
-                    <div className="w-6 h-6 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center shrink-0 border border-blue-500/20">
-                      <UploadCloud className="w-3.5 h-3.5" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="font-semibold">Importar Lançamentos (CSV)</div>
-                      <span className={`text-[10px] block ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
-                        Carga de histórico do banco de horas
-                      </span>
-                    </div>
-                  </button>
+                  {!isAuxDA && (
+                    <button
+                      onClick={() => {
+                        onOpenImportRecordsModal();
+                        setIsSettingsOpen(false);
+                      }}
+                      className={`w-full px-3.5 py-2.5 text-xs text-left flex items-center gap-2.5 transition-colors cursor-pointer ${
+                        isDark ? 'hover:bg-[#1F2229] text-[#E0E2E5]' : 'hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <div className="w-6 h-6 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center shrink-0 border border-blue-500/20">
+                        <UploadCloud className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold">Importar Lançamentos (CSV)</div>
+                        <span className={`text-[10px] block ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+                          Carga de histórico do banco de horas
+                        </span>
+                      </div>
+                    </button>
+                  )}
 
                   {/* 6. Gerenciar/Importar Colaboradores */}
-                  <button
-                    onClick={() => {
-                      onSelectTab('colaboradores');
-                      setIsSettingsOpen(false);
-                    }}
-                    className={`w-full px-3.5 py-2.5 text-xs text-left flex items-center gap-2.5 transition-colors cursor-pointer ${
-                      isDark ? 'hover:bg-[#1F2229] text-[#E0E2E5]' : 'hover:bg-slate-50 text-slate-700'
-                    }`}
-                  >
-                    <div className="w-6 h-6 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/20">
-                      <Users className="w-3.5 h-3.5" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="font-semibold">Importar Pessoas (CSV)</div>
-                      <span className={`text-[10px] block ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
-                        Cadastro em massa de funcionários
-                      </span>
-                    </div>
-                  </button>
+                  {!isAuxDA && (
+                    <button
+                      onClick={() => {
+                        onSelectTab('colaboradores');
+                        setIsSettingsOpen(false);
+                      }}
+                      className={`w-full px-3.5 py-2.5 text-xs text-left flex items-center gap-2.5 transition-colors cursor-pointer ${
+                        isDark ? 'hover:bg-[#1F2229] text-[#E0E2E5]' : 'hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <div className="w-6 h-6 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/20">
+                        <Users className="w-3.5 h-3.5" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold">Importar Pessoas (CSV)</div>
+                        <span className={`text-[10px] block ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+                          Cadastro em massa de funcionários
+                        </span>
+                      </div>
+                    </button>
+                  )}
 
-                  <div className={`my-1 border-t ${isDark ? 'border-[#1F2229]' : 'border-slate-100'}`} />
+                  {!isAuxDA && (
+                    <>
+                      <div className={`my-1 border-t ${isDark ? 'border-[#1F2229]' : 'border-slate-100'}`} />
 
-                  {/* 7. Zerar Base de Dados para Importação Real */}
-                  <button
-                    onClick={() => {
-                      onClearData();
-                      setIsSettingsOpen(false);
-                    }}
-                    className={`w-full px-3.5 py-2.5 text-xs text-left flex items-center gap-2.5 transition-colors cursor-pointer ${
-                      isDark ? 'hover:bg-[#1F2229] text-rose-300' : 'hover:bg-rose-50 text-rose-700'
-                    }`}
-                  >
-                    <div className="w-6 h-6 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center shrink-0 border border-rose-500/20">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="font-semibold text-rose-500 dark:text-rose-400">Limpar Base Central</div>
-                      <span className={`text-[10px] block opacity-80`}>
-                        Zerar dados para importar seus arquivos reais
-                      </span>
-                    </div>
-                  </button>
+                      {/* 7. Zerar Base de Dados para Importação Real */}
+                      <button
+                        onClick={() => {
+                          onClearData();
+                          setIsSettingsOpen(false);
+                        }}
+                        className={`w-full px-3.5 py-2.5 text-xs text-left flex items-center gap-2.5 transition-colors cursor-pointer ${
+                          isDark ? 'hover:bg-[#1F2229] text-rose-300' : 'hover:bg-rose-50 text-rose-700'
+                        }`}
+                      >
+                        <div className="w-6 h-6 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center shrink-0 border border-rose-500/20">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="font-semibold text-rose-500 dark:text-rose-400">Limpar Base Central</div>
+                          <span className={`text-[10px] block opacity-80`}>
+                            Zerar dados para importar seus arquivos reais
+                          </span>
+                        </div>
+                      </button>
 
-                  {/* 8. Restaurar Base de Demonstração */}
-                  <button
-                    onClick={() => {
-                      onResetData();
-                      setIsSettingsOpen(false);
-                    }}
-                    className={`w-full px-3.5 py-2.5 text-xs text-left flex items-center gap-2.5 transition-colors cursor-pointer ${
-                      isDark ? 'hover:bg-[#1F2229] text-[#8E9299]' : 'hover:bg-slate-50 text-slate-600'
-                    }`}
-                  >
-                    <div className="w-6 h-6 rounded-lg bg-slate-500/10 text-slate-400 flex items-center justify-center shrink-0 border border-slate-500/20">
-                      <RotateCcw className="w-3.5 h-3.5" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="font-medium">Carregar Exemplos Mocks</div>
-                      <span className={`text-[10px] block opacity-70`}>
-                        Recarregar dados de teste
-                      </span>
-                    </div>
-                  </button>
+                      {/* 8. Restaurar Base de Demonstração */}
+                      <button
+                        onClick={() => {
+                          onResetData();
+                          setIsSettingsOpen(false);
+                        }}
+                        className={`w-full px-3.5 py-2.5 text-xs text-left flex items-center gap-2.5 transition-colors cursor-pointer ${
+                          isDark ? 'hover:bg-[#1F2229] text-[#8E9299]' : 'hover:bg-slate-50 text-slate-600'
+                        }`}
+                      >
+                        <div className="w-6 h-6 rounded-lg bg-slate-500/10 text-slate-400 flex items-center justify-center shrink-0 border border-slate-500/20">
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        </div>
+                        <div className="flex-1">
+                          <div className="font-medium">Carregar Exemplos Mocks</div>
+                          <span className={`text-[10px] block opacity-70`}>
+                            Recarregar dados de teste
+                          </span>
+                        </div>
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -495,21 +628,29 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className={`px-4 py-3 border-b ${isDark ? 'border-[#1F2229]' : 'border-slate-100'}`}>
                     <div className="flex items-center gap-2.5">
                       <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm text-white ${
-                        userRole === 'SUPER_ADMIN' ? 'bg-indigo-600' : userRole === 'GESTOR_RH' ? 'bg-purple-600' : 'bg-amber-600'
+                        isAuxDA 
+                          ? 'bg-cyan-600' 
+                          : userRole === 'SUPER_ADMIN' 
+                            ? 'bg-indigo-600' 
+                            : userRole === 'GESTOR_RH' 
+                              ? 'bg-purple-600' 
+                              : 'bg-amber-600'
                       }`}>
-                        {userRole === 'SUPER_ADMIN' ? 'SA' : userRole === 'GESTOR_RH' ? 'RH' : 'AU'}
+                        {isAuxDA ? 'DA' : userRole === 'SUPER_ADMIN' ? 'SA' : userRole === 'GESTOR_RH' ? 'RH' : 'AU'}
                       </div>
                       <div className="overflow-hidden">
                         <div className="flex items-center gap-1.5">
                           <span className={`font-bold text-xs truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                            {userRole === 'SUPER_ADMIN' ? 'Super Admin' : userRole === 'GESTOR_RH' ? 'Gestor RH' : 'Auditor'}
+                            {isAuxDA ? 'Auxiliar de DA' : userRole === 'SUPER_ADMIN' ? 'Super Admin' : userRole === 'GESTOR_RH' ? 'Gestor RH' : 'Auditor'}
                           </span>
                           <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold border ${
-                            userRole === 'SUPER_ADMIN' 
-                              ? isDark ? 'bg-indigo-950/40 text-indigo-300 border-indigo-800/40' : 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                              : userRole === 'GESTOR_RH'
-                              ? isDark ? 'bg-purple-950/40 text-purple-300 border-purple-800/40' : 'bg-purple-50 text-purple-700 border-purple-200'
-                              : isDark ? 'bg-amber-950/40 text-amber-300 border-amber-800/40' : 'bg-amber-50 text-amber-700 border-amber-200'
+                            isAuxDA
+                              ? isDark ? 'bg-cyan-950/40 text-cyan-300 border-cyan-800/40' : 'bg-cyan-50 text-cyan-700 border-cyan-200'
+                              : userRole === 'SUPER_ADMIN' 
+                                ? isDark ? 'bg-indigo-950/40 text-indigo-300 border-indigo-800/40' : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                : userRole === 'GESTOR_RH'
+                                ? isDark ? 'bg-purple-950/40 text-purple-300 border-purple-800/40' : 'bg-purple-50 text-purple-700 border-purple-200'
+                                : isDark ? 'bg-amber-950/40 text-amber-300 border-amber-800/40' : 'bg-amber-50 text-amber-700 border-amber-200'
                           }`}>
                             {userRole}
                           </span>
@@ -534,42 +675,63 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <span className={`text-[10px] uppercase font-bold tracking-wider block mb-2 px-1 ${
                       isDark ? 'text-[#8E9299]' : 'text-slate-500'
                     }`}>
-                      Perfil de Acesso (Simulação)
+                      Perfil de Acesso
                     </span>
 
-                    <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-black/10 dark:bg-black/30 border border-slate-200/50 dark:border-slate-800/60">
+                    {/* Botões Rápidos de Simulação de Cargo */}
+                    <div className="grid grid-cols-2 gap-1.5 mb-2">
                       <button
                         onClick={() => {
                           onToggleUserMode('ADMIN');
+                          if (onSelectRole) onSelectRole('AUX_DA');
                         }}
                         className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${
-                          isAdmin 
+                          isAuxDA && isAdmin
                             ? isDark 
-                              ? 'bg-purple-950/60 text-purple-300 border border-purple-800/60 shadow-xs font-bold' 
-                              : 'bg-white text-purple-700 border border-purple-200 shadow-xs font-bold'
-                            : isDark ? 'text-[#8E9299] hover:text-white' : 'text-slate-600 hover:text-slate-900'
+                              ? 'bg-cyan-950/60 text-cyan-300 border border-cyan-800/60 shadow-xs font-bold' 
+                              : 'bg-cyan-50 text-cyan-700 border border-cyan-300 shadow-xs font-bold'
+                            : isDark ? 'bg-[#0D0F14] text-[#8E9299] hover:text-white border border-[#1F2229]' : 'bg-slate-50 text-slate-600 hover:text-slate-900 border border-slate-200'
                         }`}
+                        title="Perfil Enxuto e Simplificado para Auxiliar de DA"
                       >
-                        <ShieldCheck className="w-3.5 h-3.5" />
-                        <span>RH Admin</span>
+                        <HardHat className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Aux de DA</span>
                       </button>
 
                       <button
                         onClick={() => {
-                          onToggleUserMode('COLABORADOR');
+                          onToggleUserMode('ADMIN');
+                          if (onSelectRole) onSelectRole('GESTOR_RH');
                         }}
                         className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${
-                          !isAdmin 
+                          !isAuxDA && isAdmin
                             ? isDark 
-                              ? 'bg-amber-950/60 text-amber-300 border border-amber-800/60 shadow-xs font-bold' 
-                              : 'bg-white text-amber-800 border border-amber-200 shadow-xs font-bold'
-                            : isDark ? 'text-[#8E9299] hover:text-white' : 'text-slate-600 hover:text-slate-900'
+                              ? 'bg-purple-950/60 text-purple-300 border border-purple-800/60 shadow-xs font-bold' 
+                              : 'bg-white text-purple-700 border border-purple-200 shadow-xs font-bold'
+                            : isDark ? 'bg-[#0D0F14] text-[#8E9299] hover:text-white border border-[#1F2229]' : 'bg-slate-50 text-slate-600 hover:text-slate-900 border border-slate-200'
                         }`}
+                        title="Perfil Completo Gestor RH"
                       >
-                        <User className="w-3.5 h-3.5" />
-                        <span>Colaborador</span>
+                        <ShieldCheck className="w-3.5 h-3.5 text-purple-400" />
+                        <span>Gestor RH</span>
                       </button>
                     </div>
+
+                    <button
+                      onClick={() => {
+                        onToggleUserMode('COLABORADOR');
+                      }}
+                      className={`w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${
+                        !isAdmin 
+                          ? isDark 
+                            ? 'bg-amber-950/60 text-amber-300 border border-amber-800/60 shadow-xs font-bold' 
+                            : 'bg-white text-amber-800 border border-amber-200 shadow-xs font-bold'
+                          : isDark ? 'text-[#8E9299] hover:text-white' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <User className="w-3.5 h-3.5" />
+                      <span>Visão Portal Colaborador</span>
+                    </button>
                   </div>
 
                   <div className={`border-t ${isDark ? 'border-[#1F2229]' : 'border-slate-100'}`} />

@@ -39,8 +39,10 @@ import {
   Eye,
   EyeOff,
   KeyRound,
-  ShieldCheck
+  ShieldCheck,
+  Sparkles
 } from 'lucide-react';
+import { InfoTooltip } from './InfoTooltip';
 
 interface EmployeeManagementProps {
   employees: Employee[];
@@ -118,8 +120,6 @@ export const EmployeeManagement: React.FC<EmployeeManagementProps> = ({
   // Form State
   const [matricula, setMatricula] = useState('');
   const [nome, setNome] = useState('');
-  const [cpf, setCpf] = useState('');
-  const [dataNascimento, setDataNascimento] = useState('');
   const [initialPassword, setInitialPassword] = useState('');
   const [showInitialPassword, setShowInitialPassword] = useState(false);
   const [funcao, setFuncao] = useState('');
@@ -148,6 +148,12 @@ export const EmployeeManagement: React.FC<EmployeeManagementProps> = ({
     if (digits.length <= 6) return `${digits.slice(0, 3)}.${digits.slice(3)}`;
     if (digits.length <= 9) return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6)}`;
     return `${digits.slice(0, 3)}.${digits.slice(3, 6)}.${digits.slice(6, 9)}-${digits.slice(9)}`;
+  };
+
+  const handleGenerateRandom6DigitPassword = () => {
+    const randomPin = Math.floor(100000 + Math.random() * 900000).toString();
+    setInitialPassword(randomPin);
+    setShowInitialPassword(true);
   };
 
   // -------------------------------------------------------------
@@ -346,8 +352,6 @@ export const EmployeeManagement: React.FC<EmployeeManagementProps> = ({
     setEditingEmployee(null);
     setMatricula(`MAT-${Math.floor(1000 + Math.random() * 9000)}`);
     setNome('');
-    setCpf('');
-    setDataNascimento('');
     setInitialPassword('');
     setShowInitialPassword(false);
     setFuncao('Operador de Campo');
@@ -374,8 +378,6 @@ export const EmployeeManagement: React.FC<EmployeeManagementProps> = ({
     setEditingEmployee(emp);
     setMatricula(emp.matricula);
     setNome(emp.nome);
-    setCpf(emp.cpf ? formatCPF(emp.cpf) : '');
-    setDataNascimento(emp.dataNascimento || '');
     setInitialPassword('');
     setShowInitialPassword(false);
     setFuncao(emp.funcao);
@@ -459,12 +461,10 @@ export const EmployeeManagement: React.FC<EmployeeManagementProps> = ({
       dataInicioAlocacao: isAlocadoTemporario ? dataInicioAlocacao : undefined,
       dataFimAlocacao: isAlocadoTemporario ? dataFimAlocacao : undefined,
       dataAdmissao: dataAdmissao || '2024-01-15',
-      dataNascimento: dataNascimento || undefined,
       status,
       dataInicioStatus: ['Férias', 'Afastado'].includes(status) ? dataInicioStatus : undefined,
       dataFimStatus: ['Férias', 'Afastado'].includes(status) ? dataFimStatus : undefined,
       motivoStatus: ['Férias', 'Afastado'].includes(status) ? motivoStatus : undefined,
-      cpf: cpf.trim(),
       email: email.trim(),
       telefone: telefone.trim(),
       saldoInicialHoras: Number(saldoInicial) || 0,
@@ -503,7 +503,6 @@ export const EmployeeManagement: React.FC<EmployeeManagementProps> = ({
         detalhes: {
           matricula: cleanMatricula,
           nome: nome.trim(),
-          cpf: cpf.trim(),
           funcao: funcao.trim(),
           sede,
           status,
@@ -1428,58 +1427,22 @@ export const EmployeeManagement: React.FC<EmployeeManagementProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <div className="md:col-span-1">
-                  <label className={`block font-semibold mb-1 ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
-                    Nome Completo <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={nome}
-                    onChange={(e) => setNome(e.target.value)}
-                    placeholder="Nome do colaborador"
-                    className={`w-full px-3 py-2 rounded-lg border font-sans text-xs focus:outline-hidden ${
-                      isDark 
-                        ? 'bg-[#0D0F14] border-[#1F2229] text-[#E0E2E5] focus:border-blue-500' 
-                        : 'bg-white border-slate-300 text-slate-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
-                    }`}
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className={`block font-semibold mb-1 ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
-                    CPF (Validação Tripla)
-                  </label>
-                  <input
-                    type="text"
-                    value={cpf}
-                    onChange={(e) => setCpf(formatCPF(e.target.value))}
-                    placeholder="000.000.000-00"
-                    maxLength={14}
-                    className={`w-full px-3 py-2 rounded-lg font-mono text-xs border focus:outline-hidden ${
-                      isDark 
-                        ? 'bg-[#0D0F14] border-[#1F2229] text-[#E0E2E5] focus:border-blue-500' 
-                        : 'bg-white border-slate-300 text-slate-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
-                    }`}
-                  />
-                </div>
-
-                <div>
-                  <label className={`block font-semibold mb-1 ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
-                    Data de Nascimento
-                  </label>
-                  <input
-                    type="date"
-                    value={dataNascimento}
-                    onChange={(e) => setDataNascimento(e.target.value)}
-                    className={`w-full px-3 py-2 rounded-lg border font-sans text-xs focus:outline-hidden ${
-                      isDark 
-                        ? 'bg-[#0D0F14] border-[#1F2229] text-[#E0E2E5] focus:border-blue-500' 
-                        : 'bg-white border-slate-300 text-slate-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
-                    }`}
-                  />
-                </div>
+              <div>
+                <label className={`block font-semibold mb-1 ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
+                  Nome Completo <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={nome}
+                  onChange={(e) => setNome(e.target.value)}
+                  placeholder="Nome do colaborador"
+                  className={`w-full px-3 py-2 rounded-lg border font-sans text-xs focus:outline-hidden ${
+                    isDark 
+                      ? 'bg-[#0D0F14] border-[#1F2229] text-[#E0E2E5] focus:border-blue-500' 
+                      : 'bg-white border-slate-300 text-slate-900 focus:border-blue-500 focus:ring-1 focus:ring-blue-500'
+                  }`}
+                  required
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -1540,9 +1503,15 @@ export const EmployeeManagement: React.FC<EmployeeManagementProps> = ({
                 </div>
 
                 <div>
-                  <label className={`block font-semibold mb-1 ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
-                    Insalubridade Fixa (NR-15)
-                  </label>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <label className={`block font-semibold ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
+                      Insalubridade Fixa (NR-15)
+                    </label>
+                    <InfoTooltip 
+                      theme={theme}
+                      content="Percentual de adicional de insalubridade fixo em folha de pagamento (NR-15). ISENTO (0%), 10% (Grau Mínimo), 20% (Grau Médio) ou 40% (Grau Máximo)."
+                    />
+                  </div>
                   <select
                     value={grauInsalubridadeFixa}
                     onChange={(e) => setGrauInsalubridadeFixa(e.target.value)}
@@ -1560,9 +1529,15 @@ export const EmployeeManagement: React.FC<EmployeeManagementProps> = ({
                 </div>
 
                 <div>
-                  <label className={`block font-semibold mb-1 ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
-                    Saldo Inicial (Horas)
-                  </label>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <label className={`block font-semibold ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
+                      Saldo Inicial (Horas)
+                    </label>
+                    <InfoTooltip 
+                      theme={theme}
+                      content="Saldo legado de horas extras ou débitos anteriores ao início do controle neste sistema."
+                    />
+                  </div>
                   <input
                     type="number"
                     step="0.5"
@@ -1649,17 +1624,23 @@ export const EmployeeManagement: React.FC<EmployeeManagementProps> = ({
                 isDark ? 'bg-blue-950/20 border-blue-900/40' : 'bg-blue-50 border-blue-200'
               }`}>
                 <div className="flex items-center justify-between">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={isAlocadoTemporario}
-                      onChange={(e) => setIsAlocadoTemporario(e.target.checked)}
-                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer"
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isAlocadoTemporario}
+                        onChange={(e) => setIsAlocadoTemporario(e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-0 cursor-pointer"
+                      />
+                      <span className={`font-bold text-[11px] ${isDark ? 'text-blue-400' : 'text-blue-800'}`}>
+                        Prestação de Serviço Temporária (Missão em Outro Canteiro)
+                      </span>
+                    </label>
+                    <InfoTooltip 
+                      theme={theme}
+                      content={`As horas registradas durante a vigência da missão temporária serão computadas e visualizadas no canteiro selecionado (${sedeAtual}).`}
                     />
-                    <span className={`font-bold text-[11px] ${isDark ? 'text-blue-400' : 'text-blue-800'}`}>
-                      Prestação de Serviço Temporária (Missão em Outro Canteiro)
-                    </span>
-                  </label>
+                  </div>
                 </div>
 
                 {isAlocadoTemporario && (
@@ -1714,9 +1695,6 @@ export const EmployeeManagement: React.FC<EmployeeManagementProps> = ({
                         />
                       </div>
                     </div>
-                    <p className={`text-[10px] ${isDark ? 'text-blue-300/80' : 'text-blue-700'}`}>
-                      As horas registradas durante a vigência serão computadas e visualizadas no canteiro <strong>{sedeAtual}</strong>.
-                    </p>
                   </div>
                 )}
               </div>
@@ -1752,24 +1730,46 @@ export const EmployeeManagement: React.FC<EmployeeManagementProps> = ({
                 </div>
               </div>
 
-              {/* DEFINIÇÃO DE SENHA INICIAL PELO RH (OPCIONAL) */}
+              {/* DEFINIÇÃO DE SENHA INICIAL PELO RH (OPCIONAL COM GERADOR DE 6 DÍGITOS) */}
               <div className={`p-3.5 rounded-xl border space-y-2 ${
                 isDark ? 'bg-[#0D0F14] border-[#2A2E38]' : 'bg-slate-50 border-slate-200'
               }`}>
-                <div className="flex items-center justify-between">
-                  <label className={`flex items-center gap-1.5 font-bold text-xs ${
-                    isDark ? 'text-[#E0E2E5]' : 'text-slate-800'
-                  }`}>
-                    <Lock className="w-3.5 h-3.5 text-blue-500" />
-                    <span>Senha Inicial do Colaborador (Opcional - RH)</span>
-                  </label>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-md font-semibold ${
-                    editingEmployee?.senhaCadastrada 
-                      ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
-                      : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                  }`}>
-                    {editingEmployee?.senhaCadastrada ? 'Senha já cadastrada' : 'Primeiro acesso pendente'}
-                  </span>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <label className={`flex items-center gap-1.5 font-bold text-xs ${
+                      isDark ? 'text-[#E0E2E5]' : 'text-slate-800'
+                    }`}>
+                      <Lock className="w-3.5 h-3.5 text-blue-500" />
+                      <span>Senha Inicial do Colaborador (Opcional - RH)</span>
+                    </label>
+                    <InfoTooltip 
+                      theme={theme}
+                      content="Regra: Se preenchida, o colaborador poderá consultar o extrato imediatamente informando Matrícula + Senha. Se deixada em branco, o colaborador definirá sua própria senha no Primeiro Acesso."
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleGenerateRandom6DigitPassword}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold rounded-lg border transition-all active:scale-95 cursor-pointer ${
+                        isDark 
+                          ? 'bg-blue-950/50 text-blue-300 border-blue-700/60 hover:bg-blue-900/60 shadow-xs' 
+                          : 'bg-blue-50 text-blue-700 border-blue-300 hover:bg-blue-100 shadow-xs'
+                      }`}
+                      title="Gerar sugestão de senha numérica aleatória de 6 dígitos"
+                    >
+                      <Sparkles className="w-3 h-3 text-blue-400" />
+                      <span>Gerar 6 Dígitos</span>
+                    </button>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-md font-semibold ${
+                      editingEmployee?.senhaCadastrada 
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                        : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                    }`}>
+                      {editingEmployee?.senhaCadastrada ? 'Senha cadastrada' : 'Primeiro acesso pendente'}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="relative">
@@ -1777,7 +1777,7 @@ export const EmployeeManagement: React.FC<EmployeeManagementProps> = ({
                     type={showInitialPassword ? 'text' : 'password'}
                     value={initialPassword}
                     onChange={(e) => setInitialPassword(e.target.value)}
-                    placeholder={editingEmployee ? "Deixe em branco para manter a senha atual" : "Digite uma senha inicial para o colaborador (mín. 4 caracteres)"}
+                    placeholder={editingEmployee ? "Deixe em branco para manter a senha atual ou use o gerador acima" : "Digite ou clique em 'Gerar 6 Dígitos' (mín. 4 caracteres)"}
                     className={`w-full px-3 py-2 pr-10 rounded-lg text-xs font-mono border focus:outline-hidden ${
                       isDark 
                         ? 'bg-[#15171C] border-[#1F2229] text-[#E0E2E5] focus:border-blue-500' 
@@ -1792,10 +1792,6 @@ export const EmployeeManagement: React.FC<EmployeeManagementProps> = ({
                     {showInitialPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                   </button>
                 </div>
-
-                <p className={`text-[11px] leading-relaxed ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
-                  💡 <strong>Regra:</strong> Se preenchida, o colaborador poderá consultar o extrato imediatamente informando <strong>Matrícula + Senha</strong>. Se deixada em branco, o colaborador definirá sua própria senha no Primeiro Acesso.
-                </p>
               </div>
 
               <div className={`pt-4 border-t flex items-center justify-end space-x-2 font-sans ${

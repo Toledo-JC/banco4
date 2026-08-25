@@ -4,7 +4,6 @@ import { authService } from '../services/authService';
 import { 
   KeyRound, 
   Mail, 
-  Calendar, 
   UserCheck, 
   Lock, 
   AlertCircle, 
@@ -39,7 +38,6 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
   // Step 1 Form Fields
   const [matricula, setMatricula] = useState(initialMatricula);
   const [email, setEmail] = useState('');
-  const [dataNascimento, setDataNascimento] = useState('');
 
   // Step 2 Form Fields
   const [verifiedEmployee, setVerifiedEmployee] = useState<Employee | null>(null);
@@ -55,7 +53,7 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
   if (!isOpen) return null;
 
   // -------------------------------------------------------------
-  // ETAPA 1: VALIDAÇÃO CADASTRAL SIMULTÂNEA (MATRÍCULA + EMAIL + NASCIMENTO)
+  // ETAPA 1: VALIDAÇÃO CADASTRAL DIRETA (MATRÍCULA + EMAIL)
   // -------------------------------------------------------------
   const handleValidateIdentity = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,7 +62,6 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
 
     const cleanMat = matricula.trim().toUpperCase();
     const cleanEmail = email.trim().toLowerCase();
-    const cleanDate = dataNascimento.trim();
 
     if (!cleanMat) {
       setErrorMessage('Por favor, informe sua matrícula funcional.');
@@ -78,17 +75,10 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
       return;
     }
 
-    if (!cleanDate) {
-      setErrorMessage('Por favor, informe sua data de nascimento.');
-      setIsLoading(false);
-      return;
-    }
-
     try {
       const res = await authService.validateCollaboratorForReset(
         cleanMat,
         cleanEmail,
-        cleanDate,
         employees
       );
 
@@ -157,7 +147,6 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
     setStep('VALIDATE');
     setMatricula('');
     setEmail('');
-    setDataNascimento('');
     setVerifiedEmployee(null);
     setNewPassword('');
     setConfirmPassword('');
@@ -259,27 +248,6 @@ export const ForgotPasswordModal: React.FC<ForgotPasswordModalProps> = ({
                   placeholder="Ex: joao.silva@comara.aer.mil.br"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className={`w-full pl-10 pr-4 py-2.5 rounded-xl text-xs sm:text-sm border outline-none transition-colors ${
-                    isDark 
-                      ? 'bg-[#0D0F14] border-[#2A2E38] text-white focus:border-blue-500' 
-                      : 'bg-slate-50 border-slate-300 text-slate-900 focus:border-blue-600'
-                  }`}
-                />
-              </div>
-            </div>
-
-            {/* Data de Nascimento */}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-bold uppercase tracking-wider">
-                Data de Nascimento
-              </label>
-              <div className="relative">
-                <Calendar className={`w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 ${isDark ? 'text-gray-500' : 'text-slate-400'}`} />
-                <input
-                  type="date"
-                  required
-                  value={dataNascimento}
-                  onChange={(e) => setDataNascimento(e.target.value)}
                   className={`w-full pl-10 pr-4 py-2.5 rounded-xl text-xs sm:text-sm border outline-none transition-colors ${
                     isDark 
                       ? 'bg-[#0D0F14] border-[#2A2E38] text-white focus:border-blue-500' 
