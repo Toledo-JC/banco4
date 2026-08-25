@@ -1,5 +1,5 @@
 import Papa from 'papaparse';
-import { Employee, TimeRecord, Branch, EmployeeStatus, OccurrenceType } from '../types';
+import { Employee, TimeRecord, Branch, EmployeeStatus, OccurrenceType, InsalubrityRecord } from '../types';
 import { calculateSPTFBalance } from './calculations';
 
 export interface CSVImportResult<T> {
@@ -600,3 +600,550 @@ export function triggerFileDownload(content: string, fileName: string, mimeType:
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+export interface InsalubrityMatrixParsedWorker {
+  itemNum: string;
+  matricula: string;
+  nome: string;
+  cargo: string;
+  activityDaysCount: number;
+  isNewEmployee: boolean;
+  employeeObj: Employee;
+  sampleActivities: string[];
+}
+
+export interface InsalubrityMatrixImportResult {
+  success: boolean;
+  records: InsalubrityRecord[];
+  workers: InsalubrityMatrixParsedWorker[];
+  newEmployees: Employee[];
+  uniqueActivities: Array<{ name: string; count: number }>;
+  detectedPeriod: {
+    year: number;
+    month: number; // 0-11
+    monthName: string;
+    totalDays: number;
+    startDate?: string;
+    endDate?: string;
+  };
+  totalRecords: number;
+  errors: string[];
+}
+
+const MONTH_NAMES_PT = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+];
+
+/**
+ * Determina o grau de insalubridade baseado na atividade informada na planilha de campo.
+ */
+export function inferGrauInsalubridade(activityName: string): '10%' | '20%' | '40%' {
+  const norm = (activityName || '').toUpperCase().trim();
+  if (
+    norm.includes('ASFALT') ||
+    norm.includes('ESGOTO') ||
+    norm.includes('FOSSA') ||
+    norm.includes('ALCATR') ||
+    norm.includes('HIDROCARBONETO') ||
+    norm.includes('LIXO')
+  ) {
+    return '40%';
+  }
+  if (
+    norm.includes('CÂMARA') ||
+    norm.includes('CAMARA') ||
+    norm.includes('FRIO')
+  ) {
+    return '20%';
+  }
+  // Padrão de obras de canteiro COMARA (concreto, canaleta, rasga saco de cimento, britador, trilho, etc.)
+  return '20%';
+}
+
+/**
+ * Faz o parsing de matriz de controle de campo (Folha Quinzenal / Mensal ou Tabela) para Insalubridades Simples
+ */
+export function parseInsalubrityMatrixCSV(
+  fileContent: string,
+  existingEmployees: Employee[],
+  targetSede: Branch = 'KO',
+  currentUserEmail: string = 'coari.comara@gmail.com'
+): Promise<InsalubrityMatrixImportResult> {
+  return new Promise((resolve) => {
+    // 1. Parsing bruto de todas as linhas sem assumir cabeçalho fixo
+    Papa.parse(fileContent, {
+      skipEmptyLines: false,
+      complete: (results) => {
+        const rawRows = (results.data as any[][]) || [];
+        const errors: string[] = [];
+
+        if (rawRows.length === 0) {
+          resolve({
+            success: false,
+            records: [],
+            workers: [],
+            newEmployees: [],
+            uniqueActivities: [],
+            detectedPeriod: { year: new Date().getFullYear(), month: new Date().getMonth(), monthName: MONTH_NAMES_PT[new Date().getMonth()], totalDays: 0 },
+            totalRecords: 0,
+            errors: ['O arquivo CSV está vazio ou em formato inválido.'],
+          });
+          return;
+        }
+
+        // 2. Cria mapa de busca para colaboradores existentes
+        const empByMatricula = new Map<string, Employee>();
+        const empByNormalizedName = new Map<string, Employee>();
+
+        existingEmployees.forEach((emp) => {
+          if (emp.matricula) {
+            empByMatricula.set(sanitizeCsvCell(emp.matricula).toUpperCase(), emp);
+          }
+          if (emp.nome) {
+            const cleanName = sanitizeCsvCell(emp.nome).toLowerCase().replace(/\s+/g, ' ').trim();
+            empByNormalizedName.set(cleanName, emp);
+          }
+        });
+
+        // 3. Localiza a linha com as datas (Ex: "1/8/2026", "2/8/2026", "11/8/2026" ou "2026-08-01")
+        let dateHeaderRowIndex = -1;
+        interface DateColMeta {
+          colIndex: number;
+          dateStr: string; // YYYY-MM-DD
+          dayNum: number;
+        }
+        let dateColumns: DateColMeta[] = [];
+        let detectedYear = new Date().getFullYear();
+        let detectedMonth = new Date().getMonth();
+
+        for (let r = 0; r < Math.min(rawRows.length, 15); r++) {
+          const row = rawRows[r];
+          if (!row || !Array.isArray(row)) continue;
+
+          const tempDates: DateColMeta[] = [];
+          for (let c = 0; c < row.length; c++) {
+            const cell = sanitizeCsvCell(row[c]);
+            if (!cell) continue;
+
+            // Padrão D/M/YYYY ou DD/MM/YYYY
+            const dmyMatch = cell.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+            if (dmyMatch) {
+              const day = parseInt(dmyMatch[1], 10);
+              const month = parseInt(dmyMatch[2], 10); // 1-12
+              const year = parseInt(dmyMatch[3], 10);
+
+              if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+                detectedYear = year;
+                detectedMonth = month - 1;
+                const formatted = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                tempDates.push({ colIndex: c, dateStr: formatted, dayNum: day });
+              }
+              continue;
+            }
+
+            // Padrão YYYY-MM-DD
+            const ymdMatch = cell.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+            if (ymdMatch) {
+              const year = parseInt(ymdMatch[1], 10);
+              const month = parseInt(ymdMatch[2], 10);
+              const day = parseInt(ymdMatch[3], 10);
+              detectedYear = year;
+              detectedMonth = month - 1;
+              const formatted = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+              tempDates.push({ colIndex: c, dateStr: formatted, dayNum: day });
+            }
+          }
+
+          // Se encontramos ao menos 3 colunas de datas consecutivas nesta linha, é a linha de cabeçalho da matriz!
+          if (tempDates.length >= 3) {
+            dateHeaderRowIndex = r;
+            dateColumns = tempDates;
+            break;
+          }
+        }
+
+        // Se não encontrou cabeçalho com datas explícitas, verifica se é formato tabular linear (Matricula/Nome, Data, Atividade)
+        if (dateHeaderRowIndex === -1) {
+          // Tenta parsing tabular linear
+          let headerRowIndex = -1;
+          for (let r = 0; r < Math.min(rawRows.length, 5); r++) {
+            const row = rawRows[r];
+            const rowText = (row || []).map(c => sanitizeCsvCell(c).toLowerCase()).join(' ');
+            if (rowText.includes('atividade') && (rowText.includes('data') || rowText.includes('nome') || rowText.includes('matricula'))) {
+              headerRowIndex = r;
+              break;
+            }
+          }
+
+          if (headerRowIndex !== -1) {
+            // Processamento tabular linear
+            const headerRow = rawRows[headerRowIndex].map(c => sanitizeHeaderKey(c));
+            const colMatricula = headerRow.findIndex(h => h.includes('mat') || h.includes('id') || h.includes('cod'));
+            const colNome = headerRow.findIndex(h => h.includes('nom') || h.includes('colab') || h.includes('func'));
+            const colData = headerRow.findIndex(h => h.includes('dat') || h.includes('dia'));
+            const colAtiv = headerRow.findIndex(h => h.includes('ativ') || h.includes('serv') || h.includes('desc'));
+            const colCargo = headerRow.findIndex(h => h.includes('carg') || h.includes('func') && !h.includes('colab'));
+
+            const generatedRecords: InsalubrityRecord[] = [];
+            const workersMap = new Map<string, InsalubrityMatrixParsedWorker>();
+            const activityCounter = new Map<string, number>();
+
+            for (let r = headerRowIndex + 1; r < rawRows.length; r++) {
+              const row = rawRows[r];
+              if (!row || row.length === 0) continue;
+
+              const matriculaVal = colMatricula >= 0 ? sanitizeCsvCell(row[colMatricula]) : '';
+              const nomeVal = colNome >= 0 ? sanitizeCsvCell(row[colNome]) : '';
+              const dataVal = colData >= 0 ? sanitizeCsvCell(row[colData]) : '';
+              const ativVal = colAtiv >= 0 ? sanitizeCsvCell(row[colAtiv]).toUpperCase() : '';
+              const cargoVal = colCargo >= 0 ? sanitizeCsvCell(row[colCargo]) : 'Servente de Obras';
+
+              if ((!matriculaVal && !nomeVal) || !dataVal || !ativVal) continue;
+
+              const cleanDate = parseDateCell(dataVal);
+              const cleanName = nomeVal || 'Colaborador';
+              const cleanMatricula = matriculaVal || `MAT-${cleanName.substring(0, 3).toUpperCase()}-${r}`;
+
+              const record: InsalubrityRecord = {
+                id: `insalubre-${cleanMatricula}-${cleanDate}-${r}`,
+                matricula: cleanMatricula,
+                nomeColaborador: cleanName,
+                funcao: cargoVal,
+                sede: targetSede,
+                dataEvento: cleanDate,
+                atividadeDesempenhada: ativVal,
+                grauExposicao: inferGrauInsalubridade(ativVal),
+                quantidadeHorasDias: 1,
+                unidade: 'DIAS',
+                responsavelLancamento: 'Importação de Campo (CSV)',
+                criadoEm: new Date().toISOString(),
+                criadoPorEmail: currentUserEmail,
+              };
+
+              generatedRecords.push(record);
+              activityCounter.set(ativVal, (activityCounter.get(ativVal) || 0) + 1);
+
+              if (!workersMap.has(cleanMatricula)) {
+                workersMap.set(cleanMatricula, {
+                  itemNum: String(r),
+                  matricula: cleanMatricula,
+                  nome: cleanName,
+                  cargo: cargoVal,
+                  activityDaysCount: 1,
+                  isNewEmployee: !empByMatricula.has(cleanMatricula.toUpperCase()),
+                  employeeObj: {
+                    id: `emp-imp-${cleanMatricula}`,
+                    matricula: cleanMatricula,
+                    nome: cleanName,
+                    funcao: cargoVal,
+                    cargo: cargoVal,
+                    sede: targetSede,
+                    sede_origem: targetSede,
+                    status: 'Ativo',
+                    saldoInicialHoras: 0,
+                    primeiroAcesso: true,
+                    senhaCadastrada: false,
+                    dataAdmissao: cleanDate,
+                  },
+                  sampleActivities: [ativVal],
+                });
+              } else {
+                const w = workersMap.get(cleanMatricula)!;
+                w.activityDaysCount++;
+                if (!w.sampleActivities.includes(ativVal)) {
+                  w.sampleActivities.push(ativVal);
+                }
+              }
+            }
+
+            const workersList = Array.from(workersMap.values());
+            const newEmps = workersList.filter(w => w.isNewEmployee).map(w => w.employeeObj);
+
+            resolve({
+              success: generatedRecords.length > 0,
+              records: generatedRecords,
+              workers: workersList,
+              newEmployees: newEmps,
+              uniqueActivities: Array.from(activityCounter.entries()).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count),
+              detectedPeriod: {
+                year: detectedYear,
+                month: detectedMonth,
+                monthName: MONTH_NAMES_PT[detectedMonth],
+                totalDays: generatedRecords.length,
+              },
+              totalRecords: generatedRecords.length,
+              errors,
+            });
+            return;
+          }
+
+          resolve({
+            success: false,
+            records: [],
+            workers: [],
+            newEmployees: [],
+            uniqueActivities: [],
+            detectedPeriod: { year: detectedYear, month: detectedMonth, monthName: MONTH_NAMES_PT[detectedMonth], totalDays: 0 },
+            totalRecords: 0,
+            errors: ['Não foi possível identificar o cabeçalho com as datas da matriz de campo ou colunas de atividade.'],
+          });
+          return;
+        }
+
+        // 4. Mapeamento das colunas de identificação do colaborador na linha do cabeçalho de datas
+        const dateHeaderRow = rawRows[dateHeaderRowIndex];
+        let colItem = 0;
+        let colNome = 1;
+        let colCargo = 2;
+
+        // Procura colunas de Item, Nome, Cargo nas primeiras colunas antes da primeira data
+        const firstDateCol = dateColumns[0].colIndex;
+        for (let c = 0; c < firstDateCol; c++) {
+          const val = sanitizeCsvCell(dateHeaderRow[c]).toLowerCase();
+          if (val.includes('item') || val.includes('nº') || val.includes('n°') || val.includes('num')) {
+            colItem = c;
+          } else if (val.includes('desc') || val.includes('nome') || val.includes('colab') || val.includes('func')) {
+            colNome = c;
+          } else if (val.includes('carg') || val.includes('função') || val.includes('funcao') || val.includes('oficio')) {
+            colCargo = c;
+          }
+        }
+
+        // Se na linha do cabeçalho de data a coluna de cargo estava em branco, verifica na linha acima
+        if (dateHeaderRowIndex > 0 && (!dateHeaderRow[colCargo] || sanitizeCsvCell(dateHeaderRow[colCargo]) === '')) {
+          const prevRow = rawRows[dateHeaderRowIndex - 1];
+          for (let c = 0; c < firstDateCol; c++) {
+            const val = sanitizeCsvCell(prevRow[c]).toLowerCase();
+            if (val.includes('carg') || val.includes('funç') || val.includes('serv')) {
+              colCargo = c;
+            }
+          }
+        }
+
+        // 5. Itera pelas linhas de colaboradores (da linha posterior ao cabeçalho até o final)
+        const generatedRecords: InsalubrityRecord[] = [];
+        const workersList: InsalubrityMatrixParsedWorker[] = [];
+        const newEmployeesList: Employee[] = [];
+        const activityCounter = new Map<string, number>();
+
+        for (let r = dateHeaderRowIndex + 1; r < rawRows.length; r++) {
+          const row = rawRows[r];
+          if (!row || !Array.isArray(row) || row.length === 0) continue;
+
+          const itemNumRaw = sanitizeCsvCell(row[colItem]);
+          const nomeRaw = sanitizeCsvCell(row[colNome]);
+          const cargoRaw = (colCargo < row.length ? sanitizeCsvCell(row[colCargo]) : '') || 'Servente de Obras';
+
+          // Ignora linhas totalmente vazias ou de rodapé com totais gerais
+          if (!nomeRaw && !itemNumRaw) continue;
+          const nomeUpper = nomeRaw.toUpperCase();
+          if (nomeUpper.includes('TOTAL') || nomeUpper.includes('RESPONSÁVEL') || nomeUpper.includes('ENCARREGADO') || nomeUpper.includes('ASSINATURA')) {
+            continue;
+          }
+          if (nomeRaw.length < 2) continue;
+
+          // Tentativa de matching com base existente
+          const cleanNameNormalized = nomeRaw.toLowerCase().replace(/\s+/g, ' ').trim();
+          let matchedEmp = empByNormalizedName.get(cleanNameNormalized);
+
+          // Se não achou por nome, tenta por matrícula/item se tiver padrão
+          if (!matchedEmp && itemNumRaw) {
+            const possibleMat = `MAT-${itemNumRaw.padStart(4, '0')}`;
+            matchedEmp = empByMatricula.get(possibleMat.toUpperCase());
+          }
+
+          let finalMatricula = '';
+          let isNewEmp = false;
+          let empObj: Employee;
+
+          if (matchedEmp) {
+            finalMatricula = matchedEmp.matricula;
+            empObj = matchedEmp;
+          } else {
+            isNewEmp = true;
+            const itemClean = itemNumRaw.replace(/\D/g, '');
+            finalMatricula = itemClean 
+              ? `MAT-${itemClean.padStart(4, '0')}` 
+              : `MAT-${cleanNameNormalized.split(' ')[0].substring(0, 3).toUpperCase()}-${String(r).padStart(3, '0')}`;
+
+            empObj = {
+              id: `emp-imp-${finalMatricula}`,
+              matricula: finalMatricula,
+              nome: nomeRaw,
+              funcao: cargoRaw || 'Servente de Obras',
+              cargo: cargoRaw || 'Servente de Obras',
+              sede: targetSede,
+              sede_origem: targetSede,
+              status: 'Ativo',
+              saldoInicialHoras: 0,
+              primeiroAcesso: true,
+              senhaCadastrada: false,
+              dataAdmissao: dateColumns[0]?.dateStr || `${detectedYear}-01-01`,
+            };
+            newEmployeesList.push(empObj);
+            // Registra nos maps locais para evitar duplicatas em linhas subsequentes
+            empByMatricula.set(finalMatricula.toUpperCase(), empObj);
+            empByNormalizedName.set(cleanNameNormalized, empObj);
+          }
+
+          // Lê as atividades em cada coluna de data
+          let workerActivityCount = 0;
+          const workerActivities: string[] = [];
+
+          for (const dateCol of dateColumns) {
+            if (dateCol.colIndex >= row.length) continue;
+            const cellVal = sanitizeCsvCell(row[dateCol.colIndex]);
+
+            // Se célula tem texto (ex: CONCRETO, CANALETA, RASGA SACO, CDC, TRILHO, etc.)
+            if (cellVal && cellVal !== '0' && cellVal !== '-' && cellVal !== '.') {
+              const atividadeNome = cellVal.toUpperCase().trim();
+              workerActivityCount++;
+              if (!workerActivities.includes(atividadeNome)) {
+                workerActivities.push(atividadeNome);
+              }
+
+              activityCounter.set(atividadeNome, (activityCounter.get(atividadeNome) || 0) + 1);
+
+              const record: InsalubrityRecord = {
+                id: `insalubre-${finalMatricula}-${dateCol.dateStr}-${Math.floor(Math.random() * 10000)}`,
+                matricula: finalMatricula,
+                nomeColaborador: empObj.nome,
+                funcao: empObj.funcao || cargoRaw || 'Servente de Obras',
+                sede: empObj.sede || targetSede,
+                dataEvento: dateCol.dateStr,
+                atividadeDesempenhada: atividadeNome,
+                grauExposicao: inferGrauInsalubridade(atividadeNome),
+                quantidadeHorasDias: 1,
+                unidade: 'DIAS',
+                responsavelLancamento: 'Folha de Campo de Obras (Importação CSV)',
+                observacoes: `Apontamento importado da planilha de campo (Item ${itemNumRaw || r}).`,
+                criadoEm: new Date().toISOString(),
+                criadoPorEmail: currentUserEmail,
+              };
+
+              generatedRecords.push(record);
+            }
+          }
+
+          workersList.push({
+            itemNum: itemNumRaw || String(r - dateHeaderRowIndex),
+            matricula: finalMatricula,
+            nome: nomeRaw,
+            cargo: cargoRaw,
+            activityDaysCount: workerActivityCount,
+            isNewEmployee: isNewEmp,
+            employeeObj: empObj,
+            sampleActivities: workerActivities,
+          });
+        }
+
+        const sortedActivities = Array.from(activityCounter.entries())
+          .map(([name, count]) => ({ name, count }))
+          .sort((a, b) => b.count - a.count);
+
+        resolve({
+          success: generatedRecords.length > 0 || workersList.length > 0,
+          records: generatedRecords,
+          workers: workersList,
+          newEmployees: newEmployeesList,
+          uniqueActivities: sortedActivities,
+          detectedPeriod: {
+            year: detectedYear,
+            month: detectedMonth,
+            monthName: MONTH_NAMES_PT[detectedMonth] || 'Mês Detectado',
+            totalDays: dateColumns.length,
+            startDate: dateColumns[0]?.dateStr,
+            endDate: dateColumns[dateColumns.length - 1]?.dateStr,
+          },
+          totalRecords: generatedRecords.length,
+          errors,
+        });
+      },
+      error: (err) => {
+        resolve({
+          success: false,
+          records: [],
+          workers: [],
+          newEmployees: [],
+          uniqueActivities: [],
+          detectedPeriod: { year: new Date().getFullYear(), month: new Date().getMonth(), monthName: MONTH_NAMES_PT[new Date().getMonth()], totalDays: 0 },
+          totalRecords: 0,
+          errors: [err.message || 'Erro ao processar CSV.'],
+        });
+      },
+    });
+  });
+}
+
+/**
+ * Planilha de exemplo enviada pelo usuário (Agosto de 2026 - Obras COMARA)
+ */
+export const SAMPLE_INSALUBRITY_MATRIX_CSV = `,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+Inicio:,Inicio:,,Data,Data,Data,Data,Data,Data,Data,Data,Data,Data, ,Data,Data,Data,Data,Data,Data,Data,Data,Data,Data,Data,Data,Data,Data,Data,Data,Data,Data,Data,Data,TOTAL EM DIAS 
+,,,7,1,2,3,4,5,6,7,1,2,3,4,5,6,7,1,2,3,4,5,6,7,1,2,3,4,5,6,7,1,2,
+Item,Descrição,,1/8/2026,2/8/2026,3/8/2026,4/8/2026,5/8/2026,6/8/2026,7/8/2026,8/8/2026,9/8/2026,10/8/2026,11/8/2026,12/8/2026,13/8/2026,14/8/2026,15/8/2026,16/8/2026,17/8/2026,18/8/2026,19/8/2026,20/8/2026,21/8/2026,22/8/2026,23/8/2026,24/8/2026,25/8/2026,26/8/2026,27/8/2026,28/8/2026,29/8/2026,30/8/2026,31/8/2026,
+1,ADEMAR GOMES DE CASTRO,SERV. OBRAS,,,,,,,,,,,CONCRETO,CONCRETO,CONCRETO,CONCRETO,,,CANALETA,CANALETA/CONCRETO,,CANALETA,CANALETA,CANALETAS,,CANALETA,,,,,,,,10
+2,AlDENILSON DE SOUZA LISBOA,SERV. OBRAS,,,,,,,,,,,TRILHO/CONCRETO,CONCRETO,CONCRETO,CONCRETO,,,,,,,,,,,,,,,,,,4
+3,ADONEO FERNANDES DA SILVA,SERV. OBRAS,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,0
+4,ADRIANO SILVA DE SENA,SERV. OBRAS ,,,,,,,,,,,,,,,,,CANALETA,CONCRETO,CONCRETO,CONCRETO,,CANALETAS,,,,,,,,,,5
+5,ALCINEY MONTEIRO DA SILVA,SERV. OBRAS,,,,,,,,,,,RASGA SACO,RASGA SACO,RASGA SACO,CDC,,,,RASGA SACO/CONCRETO,CONCRETO,CONCRETO,,CANALETAS,,,,,,,,,,8
+8,ARLISON NUNES DA SILVA,SERV. OBRAS,,,,,,,,,,,TRILHO,TRILHO,TRILHO,,,,,,,,,,,,,,,,,,,3
+9,ATAIDE DA SILVA LIMA,SERV. OBRAS,,,,,,,,,,,TRILHO,TRILHO,TRILHO,,,,,,CONCRETO,CONCRETO,,,,CANALETA,,,,,,,,6
+10,BIBIANO CORDOVIL DA SILVA,SERV. OBRAS,,,,,,,,,,,TOPOGRAFIA,TOPOGRAFIA,TOPOGRAFIA,,,,,,,,,,,,,,,,,,,3
+11,CARLOS ANTONIO SOMBRA,SERV. OBRAS,,,,,,,,,,,TOPOGRAFIA,TOPOGRAFIA,TOPOGRAFIA,,,,,,,CONCRETO,,,,,,,,,,,,4
+12,CLAUDIO SANTOS DE SOUZA,SERV. OBRAS,,,,,,,,,,,RASGA SACO,RASGA SACO,RASGA SACO,RASGA SACO,,,,RASGA SACO/CONCRETO,CONCRETO,CONCRETO,,,,,,,,,,,,7
+13,COSMO DA SILVA AZEVEDO ,SERV. OBRAS,,,,,,,,,,,TRILHO,TRILHO,TRILHO,,,,CANALETA,CANALETA,,,,CANALETAS,,,,,,,,,,6
+14,CRISTOVAM DA SILVA CORREA ,SERV. OBRAS,,,,,,,,,,,CONCRETO,CONCRETO,CONCRETO,CONCRETO,,,CANALETA,CANALETA,CANALETA,CANALETA,CANALETA,CANALETAS,,CANALETA,,,,,,,,11
+15,DAMIÃO DE ARAUJO MOURA,SERV. OBRAS,,,,,,,,,,,TRILHO/CDC,RASGA SACO,RASGA SACO,RASGA SACO,,,,,,,,,,,,,,,,,,4
+16,DANIEL MOREIRA AUANARIO,SERV. OBRAS,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,0
+17,DANIEL PINHEIRO PRAIA ,SERV. OBRAS,,,,,,,,,,,TRILHO,TRILHO,TRILHO,,,,,CONCRETO,,,,,,,,,,,,,,4
+18,DIONES DA SILVA CAVALCANTE ,SERV. OBRAS,,,,,,,,,,,CONCRETO,CONCRETO,CONCRETO,CONCRETO,,,CANALETA,CANALETA,,,CANALETA,,,CANALETA,,,,,,,,8
+19,EDIVAN ROCHA DA SLVA ,SERV. OBRAS,,,,,,,,,,,RASGA SACO,RASGA SACO,RASGA SACO,CDC,,,CANALETA,CANALETA,CANALETA,CANALETA,CANALETA,,,CANALETA,,,,,,,,10
+20,EDILSON SEGUNDO NASCIMENTO,SERV. OBRAS,,,,,,,,,,,TRILHO,TRILHO,TRILHO,,,,,,CONCRETO,CONCRETO,,,,CANALETA,,,,,,,,6
+21,EDGAR DOS SANTOS ARAUJO,SERV. OBRAS,,,,,,,,,,,TRILHO,TRILHO,TRILHO,,,,,,,,,,,,,,,,,,,3
+22,ELIZEU OLIVEIRA DE SOUZA,SERV. OBRAS,,,,,,,,,,,RASGA SACO,RASGA SACO,RASGA SACO,RASGA SACO,,,,,CONCRETO,,,,,CANALETA,,,,,,,,6
+25,GEILSON MESQUITA PEREIRA,SERV. OBRAS,,,,,,,,,,,CONCRETO,CONCRETO,CONCRETO,CONCRETO,,,CANALETA,CANALETA,CANALETA,CONCRETO,CANALETA,CANALETA,,CANALETA,,,,,,,,11
+26,GIBSON ALMEIDA DA SILVA,SERV. OBRAS,,,,,,,,,,,CONCRETO,CONCRETO,,CONCRETO,,,,CANALETA,CANALETA,CANALETA,CANALETA,,,CANALETA,,,,,,,,8
+27,GUIBSON OLIVEIRA BARBOSA,SERV. OBRAS,,,,,,,,,,,TRILHO,TRILHO,TRILHO,,,,,,,,,CANALETA,,,,,,,,,,4
+30,ISMAEL GONÇALVES BARBOSA,SERV. OBRAS,,,,,,,,,,,,,,,,,,CONCRETO,CONCRETO,CONCRETO,,,,,,,,,,,,3
+31,JANIO DO NASCIMENTO QUEIROZ ,SERV. OBRAS,,,,,,,,,,,CONCRETO,CONCRETO,CONCRETO,CONCRETO,,,,,,CANALETA,CANALETA,CANALETA,,CANALETA,,,,,,,,8
+32,JANDER LIRA MACHADO,SERV. OBRAS,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,0
+33,JEFERSON AZEVEDO DE CARVALHO,SERV. OBRAS,,,,,,,,,,,TRILHO,TRILHO,TRILHO,,,,,,CONCRETO,CONCRETO,,,,CANALETA,,,,,,,,6
+35,JONES SILVA DE MELO,SERV. OBRAS,,,,,,,,,,,,TRILHO,TRILHO,,,,,,CONCRETO,,,CANALETA,,CANALETA,,,,,,,,5
+36,JOSE CARLOS MENDES DE CASTRO,SERV. OBRAS,,,,,,,,,,,TRILHO,TRILHO,TRILHO,,,,,,,,,,,,,,,,,,,3
+38,JOSIAS DOS SANTOS CARVALHO,SERV. OBRAS,,,,,,,,,,,CONCRETO,CONCRETO,CONCRETO,CONCRETO,,,,,,,,,,,,,,,,,,4
+39,JUCIMAR FERREIRA DE FREITAS JUNIOR,SERV. OBRAS ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,0
+40,LAILSON NASCIMENTO DOS SANTOS,SERV. OBRAS ,,,,,,,,,,,CONCRETO,CONCRETO,CONCRETO,CONCRETO,,,CANALETA,CANALETA,CANALETA,CANALETA,CANALETA,,,CANALETA,,,,,,,,10
+41,LUCIANO DE SOUZA FERREIRA,SERV. OBRAS,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,0
+42,LUIZ FERNANDO BERNARDO DE VASCONCELOS,SERV. OBRAS,,,,,,,,,,,CDC,RASGA SACO,CDC,CDC,,,,RASGA SACO/CONCRETO,CONCRETO,CONCRETO,,CANALETAS,,,,,,,,,,8
+43,MATEUS MARQUES RIBEIRO,SERV. OBRAS,,,,,,,,,,,TRILHO,RASGA SACO,RASGA SACO,RASGA SACO,,,,CONCRETO,CONCRETO,CONCRETO,,,,,,,,,,,,7
+44,MEMESIO DOS SANTOS ATAIDE,SERV. OBRAS,,,,,,,,,,,RASGA SACO,RASGA SACO,RASGA SACO,RASGA SACO,,,,CANALETA,CANALETA,CANALETA,CANALETA,CANALETAS,,CANALETA,,,,,,,,10
+45,MOISES CANDICO MARINHO,SERV. OBRAS ,,,,,,,,,,,CDC,RASGA SACO,CDC,CDC,,,,RASGA SACO/CONCRETO,CONCRETO,CONCRETO,,CANALETAS,,,,,,,,,,8
+46,NEUBER MENDES COSTA,SERV. OBRAS,,,,,,,,,,,CONCRETO,CONCRETO,CONCRETO,CONCRETO,,,CANALETA,CANALETA,CANALETA,CANALETA,CANALETA,,,,,,,,,,,9
+48,PAULO ALVEZ GOMES,SERV. OBRAS,,,,,,,,,,,TRILHO,TRILHO,TRILHO,,,,,,,,,,,,,,,,,,,3
+49,RAFAEL DOS SANTOS GARCIA,SERV. OBRAS,,,,,,,,,,,TRILHO,TRILHO,TRILHO,,,,,,CONCRETO,CONCRETO,,,,CANALETA,,,,,,,,6
+50,RAIMUNDO NONATO CARVALHO SOARES,SERV. OBRAS,,,,,,,,,,,CONCRETO,CONCRETO,CONCRETO,CONCRETO,,,,,,,,CANALETA,,CANALETA,,,,,,,,6
+51,ROBERIO ALVES DA SILVA,SERV. OBRAS,,,,,,,,,,,CONCRETO,CONCRETO,CONCRETO,CONCRETO,,,CANALETA,CANALETA,CANALETA,CANALETA,,,,CANALETA,,,,,,,,9
+52,RONEI FERREIRA DE ARAÚJO,SERV. OBRAS ,,,,,,,,,,,CONCRETO,CONCRETO,CONCRETO,CONCRETO,,,CANALETA,CANALETA,CANALETA,CANALETA,CANALETA,,,CANALETA,,,,,,,,10
+53,SILZONEI COELHO DE SOUZA ,SERV. OBRAS ,,,,,,,,,,,CONCRETO,CONCRETO,CONCRETO,CONCRETO,,,CANALETA,CANALETA,CANALETA,CANALETA,CANALETA,CANALETAS,,CANALETA,,,,,,,,11
+54,WANDERLEY BERNARDO DE VASCONCELOS,SERV. OBRAS ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,0
+55,OZAIAS PEREIRA DA SILVA,SERV. OBRAS,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,0
+56,RAYMISSON LUCAS MAGALHÃES DE CASTRO,SERV. OBRAS,,,,,,,,,,,TOPOGRAFIA,TOPOGRAFIA,TOPOGRAFIA,,,,,,,,,,,,,,,,,,,3
+58,JOSE RONIVON FERREIRA DE FREITAS,"MOTORISTA DE CAMINHÃO CAT ""D""",,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,0
+62,RAIONILSON FIGUEIREDO DA SILVA,MOTORISTA OPERACIONAL DE GUINCHO,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,0
+63,SAYMO LIMA DOS REIS,MOTORISTA CAT D,,,,,,,,,,,,,,,,,,,CONCRETO,,,,,,,,,,,,,
+65,CLEYSON NASCIMENTO DE ARAUJO,SERVENTE DE OBRAS,,,,,,,,,,,TRILHO/RASGA SACO,RASGA SACO,RASGA SACO,RASGA SACO,,,,,,,,,,,,,,,,,,4
+66,RUSIVALDO DA SILVA GUIMARAES,SERVENTE DE OBRAS,,,,,,,,,,,TRILHO,TRILHO,TRILHO,,,,,,,,,,,,,,,,,,,3
+67,RONALDO MOTA ARAUJO,SERV.OBRAS,,,,,,,,,,,TRILHO,TRILHO,TRILHO,,,,,,CONCRETO,CONCRETO,,,,CANALETA,,,,,,,,6
+68,FRANCISCO ASSIS DA SILVA CARDOSO,SERV. OBRAS,,,,,,,,,,,,,,,,,,CONCRETO,CONCRETO,CONCRETO,,,,,,,,,,,,3
+69,ELMIR DA SILVA VASCONCELOS,MOTORISTA CAT D,,,,,,,,,,,,,,,,,,,CONCRETO,CONCRETO,,,,,,,,,,,,
+69,JAILSON DE MACEDO,MOTORISTA CAT D,,,,,,,,,,,,,,RASGA SACO,,,,CONCRETO,MOT.ABV,MOT.ABV,,MOT.ABV,,,,,,,,,,`;
+
+/**
+ * Gera um modelo de planilha de campo em formato Matriz Quinzenal / Mensal
+ */
+export function generateInsalubrityMatrixTemplateCSV(): string {
+  return SAMPLE_INSALUBRITY_MATRIX_CSV;
+}
+

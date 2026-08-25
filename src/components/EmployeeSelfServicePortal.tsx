@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Employee, TimeRecord, Branch, Attachment } from '../types';
+import { Employee, TimeRecord, Branch, Attachment, PaystubRecord } from '../types';
+import { ContrachequeMirrorView } from './ContrachequeMirrorView';
 import { 
   UserCheck, 
   Clock, 
@@ -23,22 +24,26 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronUp,
-  ExternalLink
+  ExternalLink,
+  Receipt
 } from 'lucide-react';
 import { calculateFifoLiquidations, getRecordPrescriptionInfo } from '../utils/calculations';
 
 interface EmployeeSelfServicePortalProps {
   employees: Employee[];
   records: TimeRecord[];
+  paystubs?: PaystubRecord[];
   onViewAttachment?: (attachment: Attachment, empName?: string, recordDate?: string) => void;
   theme?: 'dark' | 'light';
 }
 
 type SelfServiceFilterType = 'TODOS' | 'PENDENTES' | 'COMPENSACOES';
+type PortalSubTab = 'BANCO_HORAS' | 'CONTRACHEQUE';
 
 export const EmployeeSelfServicePortal: React.FC<EmployeeSelfServicePortalProps> = ({
   employees,
   records,
+  paystubs = [],
   onViewAttachment,
   theme = 'dark',
 }) => {
@@ -46,6 +51,8 @@ export const EmployeeSelfServicePortal: React.FC<EmployeeSelfServicePortalProps>
   const [matriculaInput, setMatriculaInput] = useState('');
   const [authError, setAuthError] = useState<string | null>(null);
   const [authenticatedEmployee, setAuthenticatedEmployee] = useState<Employee | null>(null);
+  const [activeTab, setActiveTab] = useState<PortalSubTab>('BANCO_HORAS');
+  const [selectedCompetencia, setSelectedCompetencia] = useState<string>('');
   const [fifoFilter, setFifoFilter] = useState<SelfServiceFilterType>('TODOS');
   const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
 
@@ -135,6 +142,24 @@ export const EmployeeSelfServicePortal: React.FC<EmployeeSelfServicePortalProps>
       r.status_compensacao === 'TOTALMENTE_COMPENSADO' && r.saldoCalculado !== 0
     ).length;
   }, [allProcessedRecords]);
+
+  // Contracheques exclusivos da matrícula do servidor (LGPD)
+  const myPaystubs = useMemo(() => {
+    if (!authenticatedEmployee) return [];
+    const cleanMatricula = authenticatedEmployee.matricula.trim().toUpperCase();
+    return paystubs
+      .filter((p) => p.matricula.trim().toUpperCase() === cleanMatricula)
+      .sort((a, b) => (b.mesAno || '').localeCompare(a.mesAno || ''));
+  }, [authenticatedEmployee, paystubs]);
+
+  const currentPaystub = useMemo(() => {
+    if (myPaystubs.length === 0) return null;
+    if (selectedCompetencia) {
+      const found = myPaystubs.find(p => p.id === selectedCompetencia);
+      if (found) return found;
+    }
+    return myPaystubs[0];
+  }, [myPaystubs, selectedCompetencia]);
 
   const toggleExpand = (id: string) => {
     setExpandedRecordId(prev => prev === id ? null : id);
@@ -359,6 +384,104 @@ export const EmployeeSelfServicePortal: React.FC<EmployeeSelfServicePortalProps>
         </div>
       </div>
 
+      {/* Subtab Switcher (Banco de Horas vs Contracheque Digital) */}
+      <div className="flex items-center gap-2 border-b border-slate-700/60 pb-3 print:hidden">
+        <button
+          onClick={() => setActiveTab('BANCO_HORAS')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+            activeTab === 'BANCO_HORAS'
+              ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+              : isDark ? 'bg-slate-900 hover:bg-slate-800 text-gray-300' : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+          }`}
+        >
+          <Clock className="w-4 h-4" />
+          <span>Banco de Horas & FIFO</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('CONTRACHEQUE')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+            activeTab === 'CONTRACHEQUE'
+              ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/20'
+              : isDark ? 'bg-slate-900 hover:bg-slate-800 text-gray-300' : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+          }`}
+        >
+          <Receipt className="w-4 h-4 text-emerald-400" />
+          <span>Meu Contracheque Digital (Oficial)</span>
+          {myPaystubs.length > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-mono">
+              {myPaystubs.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* SEÇÃO: CONTRACHEQUE DIGITAL */}
+      {activeTab === 'CONTRACHEQUE' && (
+        <div className="space-y-6">
+          <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row items-center justify-between gap-3 ${
+            isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200'
+          }`}>
+            <div className="flex items-center gap-2">
+              <Receipt className="w-5 h-5 text-blue-500" />
+              <div>
+                <h4 className="font-bold text-sm">Demonstrativo de Pagamento Oficial</h4>
+                <p className={`text-[11px] ${isDark ? 'text-gray-400' : 'text-slate-500'}`}>
+                  Documentos liberados para a matrícula {authenticatedEmployee.matricula}
+                </p>
+              </div>
+            </div>
+
+            {myPaystubs.length > 0 ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400">Competência:</span>
+                <select
+                  value={currentPaystub?.id || ''}
+                  onChange={(e) => {
+                    const found = myPaystubs.find(p => p.id === e.target.value);
+                    if (found) setSelectedCompetencia(found.id);
+                  }}
+                  className={`py-2 px-3.5 rounded-xl text-xs font-bold font-mono border ${
+                    isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
+                  }`}
+                >
+                  {myPaystubs.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.periodo || p.mesAno} — Líquido: R$ {(p.valorLiquido || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <span className="text-xs text-amber-400 font-semibold">
+                Nenhum contracheque localizado no momento.
+              </span>
+            )}
+          </div>
+
+          {currentPaystub ? (
+            <ContrachequeMirrorView
+              paystub={currentPaystub}
+              theme={theme}
+            />
+          ) : (
+            <div className={`p-12 rounded-2xl border text-center ${
+              isDark ? 'bg-[#15171C] border-[#1F2229] text-gray-400' : 'bg-white border-slate-200 text-slate-500'
+            }`}>
+              <Receipt className="w-12 h-12 text-slate-500 mx-auto mb-3 stroke-1" />
+              <h5 className="font-bold text-base text-gray-200 mb-1">Nenhum Contracheque Disponível</h5>
+              <p className="text-xs max-w-md mx-auto">
+                O arquivo de folha de pagamento ainda não foi importado pelo setor de RH da COMARA para sua matrícula ({authenticatedEmployee.matricula}).
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* SEÇÃO: BANCO DE HORAS & FIFO */}
+      {activeTab === 'BANCO_HORAS' && (
+        <div className="space-y-6">
+
       {/* KPI Cards com Rastreabilidade FIFO */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className={`p-4 rounded-2xl border ${isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-gray-200 shadow-sm'}`}>
@@ -582,6 +705,8 @@ export const EmployeeSelfServicePortal: React.FC<EmployeeSelfServicePortalProps>
           </div>
         )}
       </div>
+      </div>
+      )}
     </div>
   );
 };

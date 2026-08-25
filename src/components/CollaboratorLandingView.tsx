@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { Employee, TimeRecord, Attachment, InsalubrityRecord } from '../types';
+import { Employee, TimeRecord, Attachment, InsalubrityRecord, PaystubRecord } from '../types';
 import { authService } from '../services/authService';
 import { ComaraLogo } from './ComaraLogo';
 import { ForgotPasswordModal } from './ForgotPasswordModal';
+import { ContrachequeMirrorView } from './ContrachequeMirrorView';
 import { 
   ShieldCheck, 
   Lock, 
@@ -33,13 +34,15 @@ import {
   ChevronDown,
   ChevronUp,
   Biohazard,
-  Shield
+  Shield,
+  Receipt
 } from 'lucide-react';
 
 interface CollaboratorLandingViewProps {
   employees: Employee[];
   records: TimeRecord[];
   insalubrityRecords?: InsalubrityRecord[];
+  paystubs?: PaystubRecord[];
   onOpenAdminLogin: () => void;
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
@@ -50,6 +53,7 @@ export const CollaboratorLandingView: React.FC<CollaboratorLandingViewProps> = (
   employees,
   records,
   insalubrityRecords = [],
+  paystubs = [],
   onOpenAdminLogin,
   theme,
   onToggleTheme,
@@ -67,6 +71,8 @@ export const CollaboratorLandingView: React.FC<CollaboratorLandingViewProps> = (
 
   // Authenticated Employee State
   const [authenticatedEmployee, setAuthenticatedEmployee] = useState<Employee | null>(null);
+  const [collaboratorTab, setCollaboratorTab] = useState<'EXTRATO' | 'CONTRACHEQUE'>('EXTRATO');
+  const [selectedPaystubId, setSelectedPaystubId] = useState<string>('');
 
   // Modal: First Access / Reset Password State (100% Firestore)
   const [isFirstAccessModalOpen, setIsFirstAccessModalOpen] = useState(false);
@@ -212,6 +218,27 @@ export const CollaboratorLandingView: React.FC<CollaboratorLandingViewProps> = (
       statusSaldo,
     };
   }, [authenticatedEmployee, records, insalubrityRecords, periodFilter]);
+
+  // Contracheques exclusivos do servidor autenticado (LGPD)
+  const myPaystubs = useMemo(() => {
+    if (!authenticatedEmployee) return [];
+    const empMat = authenticatedEmployee.matricula.trim().toUpperCase();
+    return paystubs
+      .filter((p) => {
+        const pMat = p.matricula.trim().toUpperCase();
+        return pMat === empMat || pMat.replace(/^0+/, '') === empMat.replace(/^0+/, '');
+      })
+      .sort((a, b) => (b.mesAno || '').localeCompare(a.mesAno || ''));
+  }, [authenticatedEmployee, paystubs]);
+
+  const currentPaystub = useMemo(() => {
+    if (myPaystubs.length === 0) return null;
+    if (selectedPaystubId) {
+      const found = myPaystubs.find(p => p.id === selectedPaystubId);
+      if (found) return found;
+    }
+    return myPaystubs[0];
+  }, [myPaystubs, selectedPaystubId]);
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-[#0A0B0D] text-[#E0E2E5]' : 'bg-[#F4F6F9] text-slate-900'} flex flex-col font-sans transition-colors`}>
@@ -484,6 +511,103 @@ export const CollaboratorLandingView: React.FC<CollaboratorLandingViewProps> = (
                   </button>
                 </div>
               </div>
+
+              {/* Seletor de Sub-Abas do Colaborador: Extrato vs Contracheque */}
+              <div className="flex items-center gap-2 border-b border-slate-700/60 pb-3 print:hidden">
+                <button
+                  type="button"
+                  onClick={() => setCollaboratorTab('EXTRATO')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+                    collaboratorTab === 'EXTRATO'
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                      : isDark ? 'bg-[#15171C] hover:bg-[#1E2128] text-gray-300' : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+                  }`}
+                >
+                  <Clock className="w-4 h-4" />
+                  <span>Banco de Horas & Insalubridade</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCollaboratorTab('CONTRACHEQUE')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+                    collaboratorTab === 'CONTRACHEQUE'
+                      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/20'
+                      : isDark ? 'bg-[#15171C] hover:bg-[#1E2128] text-gray-300' : 'bg-white hover:bg-slate-100 text-slate-700 border border-slate-200'
+                  }`}
+                >
+                  <Receipt className="w-4 h-4 text-emerald-400" />
+                  <span>Meu Contracheque Digital (Oficial)</span>
+                  {myPaystubs.length > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-mono">
+                      {myPaystubs.length}
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* RENDERIZAÇÃO: CONTRACHEQUE DIGITAL */}
+              {collaboratorTab === 'CONTRACHEQUE' && (
+                <div className="space-y-6">
+                  <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row items-center justify-between gap-3 ${
+                    isDark ? 'bg-[#15171C] border-[#222630]' : 'bg-white border-slate-200'
+                  }`}>
+                    <div className="flex items-center gap-2">
+                      <Receipt className="w-5 h-5 text-blue-500" />
+                      <div>
+                        <h4 className="font-bold text-sm">Demonstrativo de Pagamento Oficial</h4>
+                        <p className={`text-[11px] ${isDark ? 'text-gray-400' : 'text-slate-500'}`}>
+                          Documentos liberados para a matrícula {authenticatedEmployee.matricula}
+                        </p>
+                      </div>
+                    </div>
+
+                    {myPaystubs.length > 0 ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-400">Competência:</span>
+                        <select
+                          value={currentPaystub?.id || ''}
+                          onChange={(e) => setSelectedPaystubId(e.target.value)}
+                          className={`py-2 px-3.5 rounded-xl text-xs font-bold font-mono border ${
+                            isDark ? 'bg-[#0D0F14] border-[#222630] text-white' : 'bg-white border-slate-300 text-slate-900'
+                          }`}
+                        >
+                          {myPaystubs.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.periodo || p.mesAno} — Líquido: R$ {(p.valorLiquido || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-amber-400 font-semibold">
+                        Nenhum contracheque localizado no momento.
+                      </span>
+                    )}
+                  </div>
+
+                  {currentPaystub ? (
+                    <ContrachequeMirrorView
+                      paystub={currentPaystub}
+                      theme={theme}
+                    />
+                  ) : (
+                    <div className={`p-12 rounded-2xl border text-center ${
+                      isDark ? 'bg-[#15171C] border-[#222630] text-gray-400' : 'bg-white border-slate-200 text-slate-500'
+                    }`}>
+                      <Receipt className="w-12 h-12 text-slate-500 mx-auto mb-3 stroke-1" />
+                      <h5 className="font-bold text-base text-gray-200 mb-1">Nenhum Contracheque Disponível</h5>
+                      <p className="text-xs max-w-md mx-auto">
+                        O arquivo de folha de pagamento ainda não foi importado pelo setor de RH da COMARA para sua matrícula ({authenticatedEmployee.matricula}).
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* RENDERIZAÇÃO: BANCO DE HORAS & INSALUBRIDADE */}
+              {collaboratorTab === 'EXTRATO' && (
+                <div className="space-y-6">
 
               {/* --------------------------------------------------- */}
               {/* CARTÃO DIGITAL DE SALDO DO COLABORADOR              */}
@@ -934,6 +1058,8 @@ export const CollaboratorLandingView: React.FC<CollaboratorLandingViewProps> = (
                 </div>
 
               </div>
+              </div>
+              )}
 
             </div>
           )

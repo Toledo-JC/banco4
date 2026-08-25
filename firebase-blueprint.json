@@ -106,6 +106,26 @@
         "ipOrigem": { "type": "string", "maxLength": 100 }
       },
       "required": ["id", "timestamp", "matricula", "tipoAcao", "sucesso"]
+    },
+    "Contracheque": {
+      "title": "Contracheque",
+      "description": "Demonstrativo de pagamento oficial extraído de PDF para consulta individual segura LGPD",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "matricula": { "type": "string", "maxLength": 64 },
+        "nome": { "type": "string", "maxLength": 200 },
+        "cargo": { "type": "string", "maxLength": 150 },
+        "sede": { "type": "string", "maxLength": 50 },
+        "periodo": { "type": "string", "maxLength": 50 },
+        "mesAno": { "type": "string", "maxLength": 20 },
+        "totalVencimentos": { "type": "number" },
+        "totalDescontos": { "type": "number" },
+        "valorLiquido": { "type": "number" },
+        "rubricas": { "type": "array" },
+        "criadoEm": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "matricula", "nome", "periodo", "mesAno", "valorLiquido"]
     }
   },
   "firestore": {
@@ -128,6 +148,10 @@
     "/logs_acesso/{logId}": {
       "schema": "LogAcesso",
       "description": "Registro de auditoria e trilha de acessos LGPD"
+    },
+    "/contracheques/{contrachequeId}": {
+      "schema": "Contracheque",
+      "description": "Coleção de contracheques digitais extraídos do PDF oficial da folha"
     }
   }
 }

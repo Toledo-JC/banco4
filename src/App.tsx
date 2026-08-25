@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Employee, TimeRecord, Attachment, AdminUser, AdminRole, AuthSession, InsalubrityRecord, SystemConfig, GrauInsalubridade, ConstructionSite } from './types';
+import { Employee, TimeRecord, Attachment, AdminUser, AdminRole, AuthSession, InsalubrityRecord, SystemConfig, GrauInsalubridade, ConstructionSite, PaystubRecord } from './types';
 import { storageService } from './services/storageService';
 import { firestoreService, BatchProgressInfo } from './services/firestoreService';
 import { auth, googleProvider, testFirestoreConnection, isPermissionError } from './services/firebase';
@@ -29,6 +29,7 @@ import { ImportTimeRecordsModal } from './components/ImportTimeRecordsModal';
 import { InsalubrityManagement } from './components/InsalubrityManagement';
 import { CanteirosManagement } from './components/CanteirosManagement';
 import { ExecutiveReportsView } from './components/ExecutiveReportsView';
+import { ContrachequesManagement } from './components/ContrachequesManagement';
 import { ComaraLogoModal } from './components/ComaraLogoModal';
 import { DatabaseSafetyActionModal, SafetyActionType } from './components/DatabaseSafetyActionModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -49,6 +50,7 @@ export default function App() {
   const [records, setRecords] = useState<TimeRecord[]>([]);
   const [insalubrityRecords, setInsalubrityRecords] = useState<InsalubrityRecord[]>([]);
   const [constructionSites, setConstructionSites] = useState<ConstructionSite[]>([]);
+  const [paystubs, setPaystubs] = useState<PaystubRecord[]>([]);
   const [systemConfig, setSystemConfig] = useState<SystemConfig>(() => storageService.getSystemConfig());
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
@@ -209,6 +211,16 @@ export default function App() {
       }
     );
 
+    // Subscribe to Paystubs (Contracheques Digitais) in Firestore
+    const unsubPaystubs = firestoreService.subscribePaystubs(
+      (items) => {
+        setPaystubs(items);
+      },
+      (err) => {
+        console.warn('Fallback para contracheques:', err);
+      }
+    );
+
     return () => {
       try {
         if (typeof unsubEmployees === 'function') unsubEmployees();
@@ -239,6 +251,11 @@ export default function App() {
         if (typeof unsubSystemConfig === 'function') unsubSystemConfig();
       } catch (e) {
         console.warn('Erro ao cancelar listener de system config:', e);
+      }
+      try {
+        if (typeof unsubPaystubs === 'function') unsubPaystubs();
+      } catch (e) {
+        console.warn('Erro ao cancelar listener de contracheques:', e);
       }
     };
   }, [selectedMatricula]);
@@ -787,6 +804,49 @@ export default function App() {
     }
   };
 
+  const handleSaveBatchPaystubs = async (newPaystubs: PaystubRecord[]) => {
+    try {
+      setBatchProgress({
+        isOpen: true,
+        processed: 0,
+        total: newPaystubs.length,
+        percent: 0,
+        chunkIndex: 1,
+        totalChunks: Math.ceil(newPaystubs.length / 400),
+        title: 'Importando Contracheques Digitais COMARA'
+      });
+
+      await firestoreService.saveBatchPaystubs(newPaystubs, (prog) => {
+        setBatchProgress({
+          isOpen: true,
+          processed: prog.processed,
+          total: prog.total,
+          percent: prog.percent,
+          chunkIndex: prog.chunkIndex,
+          totalChunks: prog.totalChunks,
+          title: 'Importando Contracheques Digitais COMARA'
+        });
+      });
+
+      setBatchProgress(null);
+      showToast(`${newPaystubs.length} contracheques importados e gravados com sucesso!`, 'success');
+    } catch (err: any) {
+      setBatchProgress(null);
+      console.error('Erro ao salvar contracheques no Firestore:', err);
+      showToast('Erro ao gravar contracheques no Firestore.', 'error');
+    }
+  };
+
+  const handleDeletePaystub = async (id: string) => {
+    try {
+      await firestoreService.deletePaystub(id);
+      showToast('Contracheque excluído com sucesso.');
+    } catch (err: any) {
+      console.error('Erro ao deletar contracheque:', err);
+      showToast('Erro ao remover contracheque.', 'error');
+    }
+  };
+
   const isDark = theme === 'dark';
   const isAdmin = userMode === 'ADMIN' && userRole !== 'AUDITOR';
   const currentUserEmail = currentUser?.email || 'coari.comara@gmail.com';
@@ -857,6 +917,7 @@ export default function App() {
             employees={employees}
             records={records}
             insalubrityRecords={insalubrityRecords}
+            paystubs={paystubs}
             onOpenAdminLogin={() => setIsAdminLoginModalOpen(false || true)}
             theme={theme}
             onToggleTheme={handleToggleTheme}
@@ -1067,6 +1128,7 @@ export default function App() {
               onSaveBatchRecords={handleSaveInsalubrityBatch}
               onDeleteRecord={handleDeleteInsalubrityRecord}
               onUpdateEmployeeGrauFixa={handleUpdateEmployeeGrauFixa}
+              onUpdateEmployees={handleUpdateEmployees}
               onNavigateToReports={() => setActiveTab('relatorios')}
               systemConfig={systemConfig}
               onUpdateSystemConfig={handleSaveSystemConfig}
@@ -1111,6 +1173,19 @@ export default function App() {
             <EmployeeSelfServicePortal
               employees={employees}
               records={records}
+              paystubs={paystubs}
+              theme={theme}
+            />
+          )}
+
+          {activeTab === 'contracheques' && (
+            <ContrachequesManagement
+              employees={employees}
+              paystubs={paystubs}
+              onSaveBatchPaystubs={handleSaveBatchPaystubs}
+              onDeletePaystub={handleDeletePaystub}
+              currentUserEmail={currentUserEmail}
+              userRole={userRole}
               theme={theme}
             />
           )}

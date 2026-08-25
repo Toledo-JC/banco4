@@ -1,4 +1,4 @@
-import { Employee, TimeRecord, AdminUser, InsalubrityRecord, SystemConfig } from '../types';
+import { Employee, TimeRecord, AdminUser, InsalubrityRecord, SystemConfig, PaystubRecord } from '../types';
 import { INITIAL_EMPLOYEES, INITIAL_TIME_RECORDS, INITIAL_ADMINS } from '../constants/defaultData';
 
 const EMPLOYEES_KEY = 'banco_horas_employees_v1';
@@ -8,6 +8,7 @@ const INSALUBRITY_KEY = 'banco_horas_insalubrity_v1';
 const SYSTEM_CONFIG_KEY = 'banco_horas_system_config_v1';
 const CURRENT_USER_EMAIL_KEY = 'banco_horas_current_email_v1';
 const THEME_KEY = 'banco_horas_theme_v1';
+const PAYSTUBS_KEY = 'comara_paystubs_v1';
 
 export const storageService = {
   getEmployees(): Employee[] {
@@ -216,10 +217,55 @@ export const storageService = {
     this.setTheme(theme);
   },
 
+  // Paystubs (Contracheques Digitais)
+  getPaystubs(): PaystubRecord[] {
+    try {
+      const stored = localStorage.getItem(PAYSTUBS_KEY);
+      if (stored !== null) {
+        return JSON.parse(stored);
+      }
+    } catch (e) {
+      console.error('Erro ao ler contracheques do localStorage', e);
+    }
+    return [];
+  },
+
+  savePaystubs(paystubs: PaystubRecord[]) {
+    try {
+      localStorage.setItem(PAYSTUBS_KEY, JSON.stringify(paystubs));
+    } catch (e) {
+      console.error('Erro ao salvar contracheques no localStorage', e);
+    }
+  },
+
+  savePaystub(paystub: PaystubRecord) {
+    const list = this.getPaystubs();
+    const idx = list.findIndex(p => p.id === paystub.id || (p.matricula === paystub.matricula && p.mesAno === paystub.mesAno));
+    if (idx >= 0) {
+      list[idx] = paystub;
+    } else {
+      list.push(paystub);
+    }
+    this.savePaystubs(list);
+    return list;
+  },
+
+  deletePaystub(id: string) {
+    const list = this.getPaystubs().filter(p => p.id !== id);
+    this.savePaystubs(list);
+    return list;
+  },
+
+  getPaystubsByMatricula(matricula: string): PaystubRecord[] {
+    const clean = matricula.trim().toUpperCase();
+    return this.getPaystubs().filter(p => p.matricula.trim().toUpperCase() === clean);
+  },
+
   // Zerar completamente a base para importação limpa
   clearAllData() {
     this.saveEmployees([]);
     this.saveTimeRecords([]);
+    this.savePaystubs([]);
     return {
       employees: [] as Employee[],
       records: [] as TimeRecord[],

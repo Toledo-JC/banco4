@@ -17,8 +17,10 @@ import {
   Briefcase,
   Edit3,
   ArrowRightLeft,
-  FileText
+  FileText,
+  UploadCloud
 } from 'lucide-react';
+import { ImportInsalubrityMatrixModal } from './ImportInsalubrityMatrixModal';
 
 interface InsalubritySimpleMatrixViewProps {
   employees: Employee[];
@@ -26,6 +28,7 @@ interface InsalubritySimpleMatrixViewProps {
   onSaveRecord: (record: InsalubrityRecord) => Promise<void>;
   onSaveBatchRecords?: (records: InsalubrityRecord[]) => Promise<void>;
   onDeleteRecord: (id: string) => Promise<void>;
+  onUpdateEmployees?: (employees: Employee[]) => Promise<void> | void;
   constructionSites?: ConstructionSite[];
   currentUserEmail?: string;
   userRole?: AdminRole;
@@ -63,6 +66,7 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
   onSaveRecord,
   onSaveBatchRecords,
   onDeleteRecord,
+  onUpdateEmployees,
   constructionSites = [],
   currentUserEmail = 'coari.comara@gmail.com',
   userRole = 'SUPER_ADMIN',
@@ -98,11 +102,37 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
   // 4. Modais
   const [isBatchModalOpen, setIsBatchModalOpen] = useState(false);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [cellEditTarget, setCellEditTarget] = useState<{
     emp: Employee;
     dayMeta: { dayNumber: number; formattedDate: string; weekdayInitial: string; isWeekend: boolean };
     record?: InsalubrityRecord;
   } | null>(null);
+
+  const handleImportMatrixBatch = async (
+    records: InsalubrityRecord[],
+    newEmployees?: Employee[],
+    targetMonth?: number,
+    targetYear?: number
+  ) => {
+    if (targetYear !== undefined) setSelectedYear(targetYear);
+    if (targetMonth !== undefined) setSelectedMonth(targetMonth);
+    setPeriodViewMode('FULL');
+
+    // Cadastra novos colaboradores se houver
+    if (newEmployees && newEmployees.length > 0 && onUpdateEmployees) {
+      const existingMatriculas = new Set(employees.map(e => e.matricula.trim().toUpperCase()));
+      const toAdd = newEmployees.filter(e => !existingMatriculas.has(e.matricula.trim().toUpperCase()));
+      if (toAdd.length > 0) {
+        await onUpdateEmployees([...employees, ...toAdd]);
+      }
+    }
+
+    // Salva o lote de registros de insalubridade
+    if (onSaveBatchRecords) {
+      await onSaveBatchRecords(records);
+    }
+  };
 
   // Estado do Formulário em Lote de Atividades (Modo Simples: Data + Atividade + Busca + Seleção)
   const [batchSelectedEmpIds, setBatchSelectedEmpIds] = useState<string[]>([]);
@@ -595,15 +625,25 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
               </button>
             )}
 
+            {/* Botão de Importação de Planilha CSV de Campo */}
+            <button
+              onClick={() => setIsImportModalOpen(true)}
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-600 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-400 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm shadow-amber-600/20 active:scale-98 cursor-pointer"
+              title="Importar Folha de Campo / Matriz de Apontamentos em CSV"
+            >
+              <UploadCloud className="w-3.5 h-3.5" />
+              <span>Importar Folha (CSV)</span>
+            </button>
+
             <button
               onClick={() => {
                 setBatchSelectedEmpIds(filteredEmployees.map(e => e.matricula));
                 setIsBatchModalOpen(true);
               }}
-              className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm shadow-amber-600/20 active:scale-98 cursor-pointer"
+              className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold flex items-center gap-1.5 transition-all border border-slate-700 active:scale-98 cursor-pointer"
               title="Lançar atividade em lote para colaboradores"
             >
-              <Sparkles className="w-3.5 h-3.5" />
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
               <span>Lançamento em Lote</span>
             </button>
 
@@ -1610,6 +1650,16 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
           </div>
         </div>
       )}
+      {/* Modal de Importação de Matriz de Campo CSV */}
+      <ImportInsalubrityMatrixModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        employees={employees}
+        constructionSites={constructionSites}
+        onImportInsalubrityBatch={handleImportMatrixBatch}
+        theme={theme}
+        currentUserEmail={currentUserEmail}
+      />
     </div>
   );
 };

@@ -259,3 +259,42 @@ export interface SystemConfig {
   atualizadoPor?: string;
 }
 
+export interface PaystubRubrica {
+  codigo: string; // Ex: "001", "032", "600", "611", "722", "903"
+  descricao: string; // Ex: "Salário Base", "Aux Transporte", "Auxílio Alimentação", "INSS Folha"
+  referencia?: string; // Ex: "30D", "220:00", "14.00%", "6.00%"
+  provento: number; // Valor R$
+  desconto: number; // Valor R$
+  tipo: 'PROVENTO' | 'DESCONTO';
+}
+
+export interface PaystubRecord {
+  id: string; // Document ID: `${matricula}_${mesAno}` (ex: "013853_07-2026")
+  matricula: string; // Ex: "013853"
+  nome: string; // Ex: "CLESIO DE SOUZA FARO LOPES"
+  cargo: string; // Ex: "OPERADOR DE MOTONIVEL"
+  sede: string; // Ex: "KO-DL", "KO", "BE", "MN"
+  periodo: string; // Ex: "07/2026" ou "01/07/2026 a 31/07/2026"
+  mesAno: string; // Ex: "07-2026"
+  ano: number; // Ex: 2026
+  mes: number; // Ex: 7
+  dataInicio?: string; // Ex: "01/07/2026"
+  dataFim?: string; // Ex: "31/07/2026"
+  cpf?: string;
+  banco?: string;
+  agencia?: string;
+  conta?: string;
+  rubricas: PaystubRubrica[];
+  totalProventos: number;
+  totalDescontos: number;
+  valorLiquido: number;
+  salarioBase?: number;
+  baseInss?: number;
+  baseFgts?: number;
+  fgtsMes?: number;
+  baseIrrf?: number;
+  importadoEm: string;
+  importadoPorEmail?: string;
+  observacoes?: string;
+}
+

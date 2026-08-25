@@ -13,7 +13,7 @@ import {
   Unsubscribe 
 } from 'firebase/firestore';
 import { db, logFirestoreError, handleFirestoreError, OperationType, isPermissionError } from './firebase';
-import { Employee, TimeRecord, AdminUser, AdminRole, InsalubrityRecord, SystemConfig, ConstructionSite } from '../types';
+import { Employee, TimeRecord, AdminUser, AdminRole, InsalubrityRecord, SystemConfig, ConstructionSite, PaystubRecord } from '../types';
 import { hashPassword } from './authService';
 import { canteiroService } from './canteiroService';
 
@@ -27,6 +27,7 @@ export const COLLECTIONS = {
   INSALUBRIDADE: 'insalubridade_records',
   SYSTEM_CONFIG: 'system_config',
   CANTEIROS: 'canteiros_obras',
+  CONTRACHEQUES: 'contracheques',
 };
 
 export interface BatchProgressInfo {
@@ -86,6 +87,50 @@ export function prepareEmployeeForFirestore(emp: Partial<Employee>): Record<stri
     data_fim_status: emp.data_fim_status || emp.dataFimStatus || '',
     observacao_status: emp.observacao_status || emp.motivoStatus || '',
     atualizadoEm: new Date().toISOString(),
+  });
+}
+
+// Higienizador robusto com valores padrão garantidos para Contracheques Digitais
+export function preparePaystubForFirestore(p: Partial<PaystubRecord>): Record<string, any> {
+  const cleanMatricula = (p.matricula || '').trim().toUpperCase();
+  const cleanMesAno = (p.mesAno || `${String(p.mes || '01').padStart(2, '0')}-${p.ano || '2026'}`).trim();
+  const docId = p.id || `${cleanMatricula}_${cleanMesAno}`;
+
+  return sanitizeFirestoreData({
+    id: docId,
+    matricula: cleanMatricula,
+    nome: (p.nome || '').trim(),
+    cargo: (p.cargo || '').trim(),
+    sede: (p.sede || 'KO-DL').trim(),
+    periodo: p.periodo || `${cleanMesAno.replace('-', '/')}`,
+    mesAno: cleanMesAno,
+    ano: typeof p.ano === 'number' ? p.ano : parseInt(cleanMesAno.split('-')[1] || '2026', 10),
+    mes: typeof p.mes === 'number' ? p.mes : parseInt(cleanMesAno.split('-')[0] || '1', 10),
+    dataInicio: p.dataInicio || '',
+    dataFim: p.dataFim || '',
+    cpf: p.cpf || '',
+    banco: p.banco || '',
+    agencia: p.agencia || '',
+    conta: p.conta || '',
+    rubricas: Array.isArray(p.rubricas) ? p.rubricas.map(r => ({
+      codigo: String(r.codigo || ''),
+      descricao: String(r.descricao || ''),
+      referencia: r.referencia || '',
+      provento: Number(r.provento || 0),
+      desconto: Number(r.desconto || 0),
+      tipo: r.tipo || (Number(r.desconto || 0) > 0 ? 'DESCONTO' : 'PROVENTO')
+    })) : [],
+    totalProventos: Number(p.totalProventos || 0),
+    totalDescontos: Number(p.totalDescontos || 0),
+    valorLiquido: Number(p.valorLiquido || 0),
+    salarioBase: p.salarioBase !== undefined ? Number(p.salarioBase) : undefined,
+    baseInss: p.baseInss !== undefined ? Number(p.baseInss) : undefined,
+    baseFgts: p.baseFgts !== undefined ? Number(p.baseFgts) : undefined,
+    fgtsMes: p.fgtsMes !== undefined ? Number(p.fgtsMes) : undefined,
+    baseIrrf: p.baseIrrf !== undefined ? Number(p.baseIrrf) : undefined,
+    importadoEm: p.importadoEm || new Date().toISOString(),
+    importadoPorEmail: p.importadoPorEmail || '',
+    observacoes: p.observacoes || ''
   });
 }
 
@@ -889,6 +934,136 @@ export const firestoreService = {
     return canteiroService.deleteCanteiro(id);
   },
 
+  // -------------------------------------------------------------
+  // CONTRACHEQUES DIGITAIS COMARA (PDF PARSER & VISUALIZADOR)
+  // -------------------------------------------------------------
+
+  subscribePaystubs(
+    onSuccess: (paystubs: PaystubRecord[]) => void,
+    onError?: (error: Error) => void
+  ): Unsubscribe {
+    const path = COLLECTIONS.CONTRACHEQUES;
+    try {
+      return onSnapshot(
+        collection(db, path),
+        (snapshot) => {
+          const items: PaystubRecord[] = snapshot.docs.map((d) => {
+            const data = d.data() as any;
+            return {
+              id: d.id,
+              matricula: data.matricula || '',
+              nome: data.nome || '',
+              cargo: data.cargo || '',
+              sede: data.sede || 'KO-DL',
+              periodo: data.periodo || '',
+              mesAno: data.mesAno || '',
+              ano: Number(data.ano || 2026),
+              mes: Number(data.mes || 1),
+              dataInicio: data.dataInicio || '',
+              dataFim: data.dataFim || '',
+              cpf: data.cpf || '',
+              banco: data.banco || '',
+              agencia: data.agencia || '',
+              conta: data.conta || '',
+              rubricas: Array.isArray(data.rubricas) ? data.rubricas : [],
+              totalProventos: Number(data.totalProventos || 0),
+              totalDescontos: Number(data.totalDescontos || 0),
+              valorLiquido: Number(data.valorLiquido || 0),
+              salarioBase: data.salarioBase !== undefined ? Number(data.salarioBase) : undefined,
+              baseInss: data.baseInss !== undefined ? Number(data.baseInss) : undefined,
+              baseFgts: data.baseFgts !== undefined ? Number(data.baseFgts) : undefined,
+              fgtsMes: data.fgtsMes !== undefined ? Number(data.fgtsMes) : undefined,
+              baseIrrf: data.baseIrrf !== undefined ? Number(data.baseIrrf) : undefined,
+              importadoEm: data.importadoEm || '',
+              importadoPorEmail: data.importadoPorEmail || '',
+              observacoes: data.observacoes || ''
+            };
+          });
+          onSuccess(items);
+        },
+        (error) => {
+          logFirestoreError(error, OperationType.LIST, path);
+          if (onError) onError(error);
+        }
+      );
+    } catch (error) {
+      logFirestoreError(error, OperationType.LIST, path);
+      if (onError) onError(error as Error);
+      return () => {};
+    }
+  },
+
+  async savePaystub(paystub: PaystubRecord): Promise<void> {
+    const cleanMatricula = paystub.matricula.trim().toUpperCase();
+    const cleanMesAno = paystub.mesAno.trim();
+    const docId = paystub.id || `${cleanMatricula}_${cleanMesAno}`;
+    const path = `${COLLECTIONS.CONTRACHEQUES}/${docId}`;
+
+    try {
+      const sanitized = preparePaystubForFirestore(paystub);
+      await setDoc(doc(db, COLLECTIONS.CONTRACHEQUES, docId), sanitized, { merge: true });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  },
+
+  async savePaystubsBatch(
+    paystubs: PaystubRecord[],
+    onProgress?: (info: BatchProgressInfo) => void
+  ): Promise<void> {
+    const CHUNK_SIZE = 300;
+    const total = paystubs.length;
+    const totalChunks = Math.ceil(total / CHUNK_SIZE);
+
+    try {
+      for (let i = 0; i < total; i += CHUNK_SIZE) {
+        const chunk = paystubs.slice(i, i + CHUNK_SIZE);
+        const batch = writeBatch(db);
+
+        chunk.forEach((p) => {
+          const cleanMatricula = p.matricula.trim().toUpperCase();
+          const cleanMesAno = p.mesAno.trim();
+          const docId = p.id || `${cleanMatricula}_${cleanMesAno}`;
+          const ref = doc(db, COLLECTIONS.CONTRACHEQUES, docId);
+          const sanitized = preparePaystubForFirestore(p);
+          batch.set(ref, sanitized, { merge: true });
+        });
+
+        await batch.commit();
+
+        if (onProgress) {
+          const processed = Math.min(i + CHUNK_SIZE, total);
+          onProgress({
+            processed,
+            total,
+            percent: Math.round((processed / total) * 100),
+            chunkIndex: Math.floor(i / CHUNK_SIZE) + 1,
+            totalChunks,
+          });
+        }
+      }
+    } catch (error) {
+      logFirestoreError(error, OperationType.WRITE, COLLECTIONS.CONTRACHEQUES);
+      throw error;
+    }
+  },
+
+  async saveBatchPaystubs(
+    paystubs: PaystubRecord[],
+    onProgress?: (info: BatchProgressInfo) => void
+  ): Promise<void> {
+    return this.savePaystubsBatch(paystubs, onProgress);
+  },
+
+  async deletePaystub(id: string): Promise<void> {
+    const path = `${COLLECTIONS.CONTRACHEQUES}/${id}`;
+    try {
+      await deleteDoc(doc(db, COLLECTIONS.CONTRACHEQUES, id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  },
+
   async clearAllData(): Promise<void> {
     const CHUNK_SIZE = 400;
     try {
@@ -910,6 +1085,16 @@ export const firestoreService = {
         const lancBatch = writeBatch(db);
         chunk.forEach((d) => lancBatch.delete(d.ref));
         await lancBatch.commit();
+      }
+
+      // 3. Deletar contracheques em lotes
+      const paystubsSnap = await getDocs(collection(db, COLLECTIONS.CONTRACHEQUES));
+      const paystubDocs = paystubsSnap.docs;
+      for (let i = 0; i < paystubDocs.length; i += CHUNK_SIZE) {
+        const chunk = paystubDocs.slice(i, i + CHUNK_SIZE);
+        const pBatch = writeBatch(db);
+        chunk.forEach((d) => pBatch.delete(d.ref));
+        await pBatch.commit();
       }
     } catch (error) {
       logFirestoreError(error, OperationType.DELETE, 'all');
