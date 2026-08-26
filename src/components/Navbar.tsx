@@ -85,6 +85,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const isAdmin = userMode === 'ADMIN';
   const currentRole = (userRole || 'SUPER_ADMIN') as AdminRole;
   const roleMeta = ROLE_INFO[currentRole] || ROLE_INFO.AUX_DA;
+  const isAuxDA = currentRole === 'AUX_DA' || (currentRole as string) === 'AUXILIAR_DA';
 
   const canManageAdmins = rbacService.canManageAdmins(currentRole);
   const canManageSystem = rbacService.canManageSystemConfig(currentRole);

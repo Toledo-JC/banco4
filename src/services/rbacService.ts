@@ -148,7 +148,7 @@ export const rbacService = {
   },
 
   /**
-   * Checa se o usuário tem permissão para emitir Guia de Dispensa de SPTF
+   * Checa se o usuário pode emitir Guia de Dispensa de SPTF (alias canIssueDispensa)
    */
   canEmitDispensa(role?: AdminRole | string): boolean {
     if (!role) return false;
@@ -168,6 +168,10 @@ export const rbacService = {
       r === 'GERENTE_CAMPO' ||
       r === 'ROLE_GERENTE'
     );
+  },
+
+  canIssueDispensa(role?: AdminRole | string): boolean {
+    return this.canEmitDispensa(role);
   },
 
   /**
@@ -210,11 +214,31 @@ export const rbacService = {
     );
   },
 
+  canLaunchInsalubrity(role?: AdminRole | string): boolean {
+    return this.canValidateInsalubrity(role);
+  },
+
   /**
    * Checa se o usuário pode gerenciar contracheques e importação da folha
    */
   canManagePaystubs(role?: AdminRole | string): boolean {
     return this.hasGlobalAccess(role);
+  },
+
+  canImportFolha(role?: AdminRole | string): boolean {
+    return this.hasGlobalAccess(role);
+  },
+
+  canManageCanteiros(role?: AdminRole | string): boolean {
+    return this.hasGlobalAccess(role);
+  },
+
+  canManageSystemConfig(role?: AdminRole | string): boolean {
+    return this.hasGlobalAccess(role);
+  },
+
+  canManageAdmins(role?: AdminRole | string, email?: string): boolean {
+    return this.canManageAdminPermissions(role, email);
   },
 
   /**

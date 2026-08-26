@@ -1534,7 +1534,7 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
 
                   <button
                     id="btn-print-official-guide"
-                    onClick={handlePrint}
+                    onClick={() => handlePrint()}
                     className="flex items-center gap-2 px-5 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 transition-all active:scale-95"
                     title="Disparar diálogo de impressão do navegador"
                   >
