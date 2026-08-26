@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useMemo, useId } from 'react';
-import { Employee, TimeRecord, DispensaSptfRecord, Branch, SystemConfig, ConstructionSite } from '../types';
-import { ComaraLogo } from './ComaraLogo';
-import { getSignaturesForCanteiro } from '../services/canteiroService';
+import { Employee, TimeRecord, DispensaSptfRecord, ConstructionSite, SystemConfig } from '../types';
 import { getEmployeeTotalBalance } from '../services/timebankEngine';
 import { 
   X, 
@@ -10,21 +8,18 @@ import {
   Clock, 
   Calendar, 
   Building2, 
-  User, 
   CheckCircle2, 
   AlertCircle, 
-  Scissors, 
   Sparkles, 
   Search, 
   History, 
   PlusCircle, 
   Trash2, 
   ArrowRight,
-  ShieldCheck,
-  Award
+  Coffee
 } from 'lucide-react';
 
-interface SptfDispensaModalProps {
+export interface SptfDispensaModalProps {
   isOpen: boolean;
   onClose: () => void;
   employees: Employee[];
@@ -42,31 +37,254 @@ interface SptfDispensaModalProps {
   currentUserName?: string;
 }
 
-function formatDateBR(isoDate?: string): string {
+/**
+ * Formata data ISO (AAAA-MM-DD) para padrão brasileiro DD/MM/AAAA
+ */
+export function formatDateBR(isoDate?: string): string {
   if (!isoDate) return '____/____/________';
   const parts = isoDate.split('-');
   if (parts.length !== 3) return isoDate;
   return `${parts[2]}/${parts[1]}/${parts[0]}`;
 }
 
-function calculateTimeDiffHours(start: string, end: string): number {
-  if (!start || !end) return 0;
+/**
+ * REGRA DE CÁLCULO DAS HORAS COM TRAVA DO ALMOÇO (12:00 às 13:00)
+ * - O período entre 12:00 e 13:00 é HORA DE ALMOÇO obrigatória (não remunerado e não computável).
+ * - Se o horário cruzar a janela de 12:00 às 13:00, subtrai exatamente o tempo de almoço (até 60 min) do saldo total.
+ * - Exemplo: Das 07:00 às 16:00 (9 horas relógio) = 8.0h a abater no Banco de Horas.
+ */
+export function calculateDispensaHours(start: string, end: string): {
+  rawHours: number;
+  lunchDeductionHours: number;
+  netHours: number;
+} {
+  if (!start || !end) {
+    return { rawHours: 0, lunchDeductionHours: 0, netHours: 0 };
+  }
+
   const [h1, m1] = start.split(':').map(Number);
   const [h2, m2] = end.split(':').map(Number);
-  if (isNaN(h1) || isNaN(m1) || isNaN(h2) || isNaN(m2)) return 0;
-  const minutes1 = h1 * 60 + m1;
-  const minutes2 = h2 * 60 + m2;
-  const diffMinutes = minutes2 - minutes1;
-  if (diffMinutes <= 0) return 0;
-  return Number((diffMinutes / 60).toFixed(2));
+  if (isNaN(h1) || isNaN(m1) || isNaN(h2) || isNaN(m2)) {
+    return { rawHours: 0, lunchDeductionHours: 0, netHours: 0 };
+  }
+
+  const startMinutes = h1 * 60 + m1;
+  const endMinutes = h2 * 60 + m2;
+  const diffMinutes = endMinutes - startMinutes;
+  if (diffMinutes <= 0) {
+    return { rawHours: 0, lunchDeductionHours: 0, netHours: 0 };
+  }
+
+  const rawHours = Number((diffMinutes / 60).toFixed(2));
+
+  // Janela obrigatória de almoço: 12:00 (720 min) às 13:00 (780 min)
+  const lunchStart = 12 * 60; // 720
+  const lunchEnd = 13 * 60;   // 780
+
+  const overlapStart = Math.max(startMinutes, lunchStart);
+  const overlapEnd = Math.min(endMinutes, lunchEnd);
+  const lunchOverlapMinutes = Math.max(0, overlapEnd - overlapStart);
+  const lunchDeductionHours = Number((lunchOverlapMinutes / 60).toFixed(2));
+
+  const netMinutes = Math.max(0, diffMinutes - lunchOverlapMinutes);
+  const netHours = Number((netMinutes / 60).toFixed(2));
+
+  return {
+    rawHours,
+    lunchDeductionHours,
+    netHours
+  };
 }
 
-function formatHoursToHoursMinutes(hours: number): string {
+export function formatHoursToHoursMinutes(hours: number): string {
   const h = Math.floor(hours);
   const m = Math.round((hours - h) * 60);
   return `${h}h${m > 0 ? String(m).padStart(2, '0') + 'min' : '00'}`;
 }
 
+// ============================================================================
+// COMPONENTE DE UMA VIA INDIVIDUAL DA DISPENSA DE SPTF (LAYOUT DA PLANILHA)
+// ============================================================================
+export interface DispensaViaProps {
+  dispensa: DispensaSptfRecord;
+  viaIndex?: 1 | 2;
+}
+
+export const DispensaVia: React.FC<DispensaViaProps> = ({ dispensa }) => {
+  const dataFmt = formatDateBR(dispensa.data);
+  const periodoStr = `${dataFmt} (${dispensa.horarioInicio}) A ${dataFmt} (${dispensa.horarioFim})`;
+  const saramStr = dispensa.saram || dispensa.matricula || '';
+  const secaoStr = dispensa.secaoCanteiro || 'DECO-KO';
+  const motivoStr = dispensa.motivo || 'COMPENSAÇÃO BANCO DE HORAS';
+
+  return (
+    <div className="dispensa-via w-full border-2 border-black bg-white text-black font-sans leading-tight">
+      {/* ------------------------------------------------------------- */}
+      {/* CABEÇALHO: Célula Esquerda (Logo) | Célula Direita (Título)    */}
+      {/* ------------------------------------------------------------- */}
+      <div className="grid grid-cols-12 border-b-2 border-black">
+        {/* Célula Esquerda: Logo da COMARA (fundo transparente) */}
+        <div className="col-span-3 sm:col-span-3 flex items-center justify-center p-2.5 border-r-2 border-black bg-white">
+          <img 
+            src="/comara-logo.png" 
+            alt="Logo COMARA" 
+            className="h-14 sm:h-16 w-auto max-h-16 object-contain"
+            referrerPolicy="no-referrer"
+          />
+        </div>
+
+        {/* Célula Direita: Título centralizado em negrito e caixa alta */}
+        <div className="col-span-9 sm:col-span-9 flex items-center justify-center p-3 bg-white text-center">
+          <h1 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-black">
+            DISPENSA DE SPTF
+          </h1>
+        </div>
+      </div>
+
+      {/* ------------------------------------------------------------- */}
+      {/* LINHA 1: NOME: [Nome do Colaborador]                           */}
+      {/* ------------------------------------------------------------- */}
+      <div className="border-b-2 border-black p-2.5 px-3 flex items-center gap-2 bg-white">
+        <span className="font-black text-xs sm:text-sm uppercase tracking-wide shrink-0 text-black">
+          NOME:
+        </span>
+        <span className="font-bold text-xs sm:text-sm uppercase text-black truncate">
+          {dispensa.nome}
+        </span>
+      </div>
+
+      {/* ------------------------------------------------------------- */}
+      {/* LINHA 2: SARAM: [Matrícula] | SEÇÃO: [Seção/Canteiro]          */}
+      {/* ------------------------------------------------------------- */}
+      <div className="grid grid-cols-12 border-b-2 border-black divide-x-2 divide-black bg-white">
+        <div className="col-span-6 p-2.5 px-3 flex items-center gap-2">
+          <span className="font-black text-xs sm:text-sm uppercase tracking-wide shrink-0 text-black">
+            SARAM:
+          </span>
+          <span className="font-bold text-xs sm:text-sm font-mono text-black">
+            {saramStr}
+          </span>
+        </div>
+        <div className="col-span-6 p-2.5 px-3 flex items-center gap-2">
+          <span className="font-black text-xs sm:text-sm uppercase tracking-wide shrink-0 text-black">
+            SEÇÃO:
+          </span>
+          <span className="font-bold text-xs sm:text-sm uppercase text-black">
+            {secaoStr}
+          </span>
+        </div>
+      </div>
+
+      {/* ------------------------------------------------------------- */}
+      {/* LINHA 3: PERÍODO: [...] | MOTIVO: [...]                        */}
+      {/* ------------------------------------------------------------- */}
+      <div className="grid grid-cols-12 border-b-2 border-black divide-x-2 divide-black bg-white">
+        <div className="col-span-7 sm:col-span-6 p-2.5 px-3 flex items-center gap-2">
+          <span className="font-black text-xs sm:text-sm uppercase tracking-wide shrink-0 text-black">
+            PERÍODO:
+          </span>
+          <span className="font-bold text-[11px] sm:text-xs text-black">
+            {periodoStr}
+          </span>
+        </div>
+        <div className="col-span-5 sm:col-span-6 p-2.5 px-3 flex items-center gap-2">
+          <span className="font-black text-xs sm:text-sm uppercase tracking-wide shrink-0 text-black">
+            MOTIVO:
+          </span>
+          <span className="font-bold text-xs sm:text-sm uppercase text-black truncate">
+            {motivoStr}
+          </span>
+        </div>
+      </div>
+
+      {/* ------------------------------------------------------------- */}
+      {/* RODAPÉ: RECEBIMENTO E ASSINATURAS (4 BLOCOS)                   */}
+      {/* ------------------------------------------------------------- */}
+      <div className="grid grid-cols-4 divide-x-2 divide-black min-h-[96px] bg-white">
+        {/* Bloco 1: RECEBIDO POR: */}
+        <div className="p-2 sm:p-2.5 flex flex-col justify-between text-[11px]">
+          <span className="font-black uppercase text-[11px] sm:text-xs block text-black leading-tight">
+            RECEBIDO POR:
+          </span>
+          <div className="space-y-1.5 pt-1">
+            <div className="flex items-center gap-1 font-bold text-[10px] sm:text-[11px] text-black">
+              <span>DATA:</span>
+              <span className="font-mono tracking-wider font-normal">___/___/______</span>
+            </div>
+            <div className="flex items-center gap-1 font-bold text-[10px] sm:text-[11px] text-black">
+              <span>HORA:</span>
+              <span className="font-mono tracking-wider font-normal">___:___</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Bloco 2: Assinatura SPTF */}
+        <div className="p-2 sm:p-2.5 flex flex-col justify-between text-center">
+          <div className="h-10 sm:h-12 flex items-end justify-center">
+            <div className="w-4/5 border-b border-black"></div>
+          </div>
+          <div className="pt-1">
+            <span className="font-black uppercase text-[11px] sm:text-xs block text-black">
+              SPTF
+            </span>
+          </div>
+        </div>
+
+        {/* Bloco 3: Assinatura CHEFE IMEDIATO */}
+        <div className="p-2 sm:p-2.5 flex flex-col justify-between text-center">
+          <div className="h-10 sm:h-12 flex items-end justify-center">
+            <div className="w-4/5 border-b border-black"></div>
+          </div>
+          <div className="pt-1">
+            <span className="font-black uppercase text-[11px] sm:text-xs block text-black">
+              CHEFE IMEDIATO
+            </span>
+          </div>
+        </div>
+
+        {/* Bloco 4: Assinatura SERVIDOR */}
+        <div className="p-2 sm:p-2.5 flex flex-col justify-between text-center">
+          <div className="h-10 sm:h-12 flex items-end justify-center">
+            <div className="w-4/5 border-b border-black"></div>
+          </div>
+          <div className="pt-1">
+            <span className="font-black uppercase text-[11px] sm:text-xs block text-black">
+              SERVIDOR
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================================
+// TEMPLATE DE IMPRESSÃO A4 (2 VIAS SEPARADAS POR OBS: -----)
+// ============================================================================
+export interface DispensaPrintTemplateProps {
+  dispensa: DispensaSptfRecord;
+}
+
+export const DispensaPrintTemplate: React.FC<DispensaPrintTemplateProps> = ({ dispensa }) => {
+  return (
+    <div id="sptf-print-container" className="w-full bg-white text-black p-2 sm:p-4 print:p-0">
+      {/* 1ª VIA */}
+      <DispensaVia dispensa={dispensa} viaIndex={1} />
+
+      {/* LINHA PONTILHADA DE CORTE CONFORME MODELO */}
+      <div className="text-center font-mono text-xs sm:text-sm font-bold text-black select-none my-4 sm:my-5 tracking-widest leading-none">
+        Obs: ----------------------------------------------------
+      </div>
+
+      {/* 2ª VIA (DUPLICAÇÃO IDÊNTICA NA MESMA PÁGINA A4) */}
+      <DispensaVia dispensa={dispensa} viaIndex={2} />
+    </div>
+  );
+};
+
+// ============================================================================
+// COMPONENTE PRINCIPAL DO MODAL DE DISPENSA SPTF
+// ============================================================================
 export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
   isOpen,
   onClose,
@@ -74,12 +292,10 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
   records,
   timeRecords,
   dispensas = [],
-  constructionSites = [],
   onSaveDispensa,
   onDeleteDispensa,
   preselectedMatricula,
   preselectedDate,
-  systemConfig,
   theme = 'dark',
   currentUserEmail = '',
   currentUserName = 'Gestor SPTF'
@@ -94,17 +310,17 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
   const [selectedMatricula, setSelectedMatricula] = useState<string>('');
   const [secaoCanteiro, setSecaoCanteiro] = useState<string>('DECO-KO');
   const [dataDispensa, setDataDispensa] = useState<string>(todayStr);
-  const [horarioInicio, setHorarioInicio] = useState<string>('13:00');
+  const [horarioInicio, setHorarioInicio] = useState<string>('07:00');
   const [horarioFim, setHorarioFim] = useState<string>('16:00');
   const [motivo, setMotivo] = useState<string>('COMPENSAÇÃO BANCO DE HORAS');
   const [observacoes, setObservacoes] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   
-  // Guia em visualização/impressão
+  // Guia ativa para impressão
   const [activePrintDispensa, setActivePrintDispensa] = useState<DispensaSptfRecord | null>(null);
 
-  // Inicialização de valores ao abrir
+  // Inicialização ao abrir
   useEffect(() => {
     if (isOpen) {
       setDataDispensa(preselectedDate || todayStr);
@@ -115,7 +331,7 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
       }
       setFeedbackMsg(null);
     }
-  }, [isOpen, preselectedMatricula, preselectedDate]);
+  }, [isOpen, preselectedMatricula, preselectedDate, employees]);
 
   // Colaborador selecionado
   const selectedEmployee = useMemo(() => {
@@ -131,10 +347,12 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
     }
   }, [selectedEmployee]);
 
-  // Cálculo de horas calculadas
-  const calculatedHours = useMemo(() => {
-    return calculateTimeDiffHours(horarioInicio, horarioFim);
+  // Cálculo das Horas com regra obrigatória da Trava do Almoço (12:00 às 13:00)
+  const hoursCalculation = useMemo(() => {
+    return calculateDispensaHours(horarioInicio, horarioFim);
   }, [horarioInicio, horarioFim]);
+
+  const calculatedHours = hoursCalculation.netHours;
 
   // Saldo do colaborador
   const employeeCurrentBalance = useMemo(() => {
@@ -145,17 +363,6 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
   const forecastedBalance = useMemo(() => {
     return employeeCurrentBalance - calculatedHours;
   }, [employeeCurrentBalance, calculatedHours]);
-
-  // Filtragem de colaboradores para busca
-  const filteredEmployees = useMemo(() => {
-    if (!searchTerm.trim()) return employees;
-    const term = searchTerm.toLowerCase();
-    return employees.filter(e => 
-      e.nome.toLowerCase().includes(term) || 
-      e.matricula.toLowerCase().includes(term) ||
-      (e.funcao && e.funcao.toLowerCase().includes(term))
-    );
-  }, [employees, searchTerm]);
 
   // Filtragem de histórico de dispensas
   const filteredDispensas = useMemo(() => {
@@ -177,7 +384,7 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
       return;
     }
     if (calculatedHours <= 0) {
-      setFeedbackMsg({ type: 'error', text: 'O horário de término deve ser posterior ao horário de início.' });
+      setFeedbackMsg({ type: 'error', text: 'O horário selecionado deve resultar em horas válidas a abater (maior que zero após dedução do almoço).' });
       return;
     }
     if (!dataDispensa) {
@@ -235,7 +442,7 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
         eFeriado: false,
         diaSemana: new Date(dataDispensa + 'T12:00:00').getDay(),
         diaSemanaNome: ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'][new Date(dataDispensa + 'T12:00:00').getDay()] || '',
-        observacao: `Dispensa SPTF Nº ${numeroGuia} (${horarioInicio} às ${horarioFim}) - Motivo: ${motivo}${observacoes ? ' - ' + observacoes : ''}`,
+        observacao: `Dispensa SPTF Nº ${numeroGuia} (${horarioInicio} às ${horarioFim}) - Motivo: ${motivo}${hoursCalculation.lunchDeductionHours > 0 ? ' [Trava de Almoço 12h-13h: -' + hoursCalculation.lunchDeductionHours + 'h]' : ''}${observacoes ? ' - ' + observacoes : ''}`,
         criadoEm: now.toISOString(),
         criadoPorEmail: currentUserEmail,
         atualizadoEm: now.toISOString(),
@@ -245,7 +452,7 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
 
       setActivePrintDispensa(dispensaRecord);
       setActiveTab('print');
-      setFeedbackMsg({ type: 'success', text: `Guia ${numeroGuia} emitida e debitada com sucesso no Banco de Horas!` });
+      setFeedbackMsg({ type: 'success', text: `Guia ${numeroGuia} emitida e debitada com sucesso (-${calculatedHours.toFixed(1)}h no Banco de Horas)!` });
     } catch (err: any) {
       console.error('Erro ao emitir dispensa:', err);
       setFeedbackMsg({ type: 'error', text: err?.message || 'Falha ao salvar a Dispensa de SPTF.' });
@@ -258,16 +465,53 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
     window.print();
   };
 
+  // Objeto temporário para visualização em tempo real caso não haja guia gravada ainda
+  const previewDispensa: DispensaSptfRecord = useMemo(() => {
+    if (activePrintDispensa) return activePrintDispensa;
+    return {
+      id: 'preview',
+      numeroGuia: 'SPTF-2026/___',
+      matricula: selectedEmployee?.matricula || '______',
+      nome: selectedEmployee?.nome || 'COLABORADOR NÃO SELECIONADO',
+      saram: selectedEmployee?.matricula || '______',
+      secaoCanteiro: secaoCanteiro || 'DECO-KO',
+      data: dataDispensa,
+      horarioInicio,
+      horarioFim,
+      totalHoras: calculatedHours,
+      motivo: motivo || 'COMPENSAÇÃO BANCO DE HORAS',
+      observacoes: observacoes.trim(),
+      emitidoPorNome: currentUserName,
+      emitidoPorEmail: currentUserEmail,
+      emitidoEm: new Date().toISOString(),
+      status: 'EMITIDA',
+    };
+  }, [activePrintDispensa, selectedEmployee, secaoCanteiro, dataDispensa, horarioInicio, horarioFim, calculatedHours, motivo, observacoes, currentUserName, currentUserEmail]);
+
   return (
     <div 
       id={`modal-${modalId}`}
-      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/70 backdrop-blur-sm overflow-y-auto animate-fadeIn print:p-0 print:bg-white print:static print:overflow-visible"
+      className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/75 backdrop-blur-sm overflow-y-auto print:p-0 print:bg-white print:static print:overflow-visible"
       role="dialog"
       aria-modal="true"
     >
-      {/* Estilos dedicados para impressão A4 em 2 vias perfeitas */}
+      {/* ============================================================== */}
+      {/* ESTILOS DE IMPRESSÃO (@MEDIA PRINT) ULTRA-PRECISOS PARA A4     */}
+      {/* ============================================================== */}
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
+          @page {
+            size: A4 portrait;
+            margin: 8mm 10mm 8mm 10mm;
+          }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
           body * {
             visibility: hidden;
           }
@@ -278,20 +522,16 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
             position: absolute;
             left: 0;
             top: 0;
-            width: 100%;
-            margin: 0;
-            padding: 0;
-            background: white !important;
-            color: black !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #000000 !important;
           }
           .no-print {
             display: none !important;
           }
-          @page {
-            size: A4 portrait;
-            margin: 8mm 10mm 8mm 10mm;
-          }
-          .sptf-via-card {
+          .dispensa-via {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
           }
@@ -313,14 +553,14 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
-                  Emissão de Dispensa de SPTF
+                  Dispensa de SPTF
                 </h2>
                 <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
                   2 Vias A4
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                Lançamento automático no Banco de Horas com guia oficial COMARA
+                Modelo oficial de folha de dispensa com trava de almoço (12h-13h) e débito automático
               </p>
             </div>
           </div>
@@ -354,20 +594,18 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
                 Histórico ({dispensas.length})
               </button>
 
-              {activePrintDispensa && (
-                <button
-                  id="btn-tab-print"
-                  onClick={() => setActiveTab('print')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                    activeTab === 'print'
-                      ? 'bg-emerald-600 text-white shadow-sm'
-                      : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  Imprimir 2 Vias
-                </button>
-              )}
+              <button
+                id="btn-tab-print"
+                onClick={() => setActiveTab('print')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  activeTab === 'print'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Printer className="w-3.5 h-3.5" />
+                Imprimir 2 Vias
+              </button>
             </div>
 
             <button
@@ -405,31 +643,29 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
           {/* ============================================================ */}
           {activeTab === 'form' && (
             <div className="no-print space-y-6">
-              {/* Seleção do Colaborador */}
+              {/* Seleção do Colaborador e Seção */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="md:col-span-2 space-y-1.5">
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400">
                     1. Colaborador / Matrícula (SARAM) <span className="text-rose-400">*</span>
                   </label>
-                  <div className="relative">
-                    <select
-                      id="select-dispensa-colaborador"
-                      value={selectedMatricula}
-                      onChange={(e) => setSelectedMatricula(e.target.value)}
-                      className={`w-full px-3.5 py-2.5 rounded-xl border text-sm font-medium transition-all focus:ring-2 focus:ring-blue-500 outline-none ${
-                        isDark 
-                          ? 'bg-slate-800/90 border-slate-700 text-slate-100 hover:border-slate-600' 
-                          : 'bg-slate-50 border-slate-300 text-slate-900 hover:border-slate-400'
-                      }`}
-                    >
-                      <option value="" disabled>-- Selecione o Colaborador --</option>
-                      {employees.map(emp => (
-                        <option key={emp.matricula} value={emp.matricula}>
-                          {emp.nome} ({emp.matricula}) - {emp.funcao || 'Servidor'} [{emp.sede || 'KO'}]
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <select
+                    id="select-dispensa-colaborador"
+                    value={selectedMatricula}
+                    onChange={(e) => setSelectedMatricula(e.target.value)}
+                    className={`w-full px-3.5 py-2.5 rounded-xl border text-sm font-medium transition-all focus:ring-2 focus:ring-blue-500 outline-none ${
+                      isDark 
+                        ? 'bg-slate-800/90 border-slate-700 text-slate-100 hover:border-slate-600' 
+                        : 'bg-slate-50 border-slate-300 text-slate-900 hover:border-slate-400'
+                    }`}
+                  >
+                    <option value="" disabled>-- Selecione o Colaborador --</option>
+                    {employees.map(emp => (
+                      <option key={emp.matricula} value={emp.matricula}>
+                        {emp.nome} ({emp.matricula}) - {emp.funcao || 'Servidor'} [{emp.sede || 'KO'}]
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Seção / Canteiro de Lotação */}
@@ -469,7 +705,7 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
                     <div>
                       <h4 className="text-sm font-bold text-slate-200">{selectedEmployee.nome}</h4>
                       <p className="text-xs text-slate-400">
-                        Matrícula / SARAM: <span className="font-mono text-slate-300">{selectedEmployee.matricula}</span> • Função: {selectedEmployee.funcao || 'Servidor'}
+                        SARAM: <span className="font-mono text-slate-300 font-bold">{selectedEmployee.matricula}</span> • Seção: <span className="font-semibold text-slate-300">{secaoCanteiro}</span>
                       </p>
                     </div>
                   </div>
@@ -567,28 +803,32 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
                 </div>
               </div>
 
-              {/* Destaque do Cálculo Automático */}
-              <div className="p-4 rounded-xl bg-gradient-to-r from-blue-900/30 to-indigo-900/30 border border-blue-500/30 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-blue-600/30 text-blue-400">
-                    <Sparkles className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h5 className="text-xs font-semibold uppercase tracking-wider text-blue-300">
-                      Cálculo Automático de Horas a Abater
+              {/* Destaque do Cálculo Automático com a Trava do Almoço (12h-13h) */}
+              <div className="p-4 rounded-xl bg-gradient-to-r from-blue-900/30 via-indigo-900/20 to-blue-900/30 border border-blue-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-blue-400" />
+                    <h5 className="text-xs font-bold uppercase tracking-wider text-blue-300">
+                      Cálculo de Horas com Trava de Almoço (12:00 às 13:00)
                     </h5>
-                    <p className="text-xs text-slate-400">
-                      Período de {horarioInicio} às {horarioFim} ({formatDateBR(dataDispensa)})
-                    </p>
                   </div>
+                  <p className="text-xs text-slate-400 flex items-center gap-2">
+                    <span>Período bruto: <strong>{hoursCalculation.rawHours.toFixed(1)}h</strong> ({horarioInicio} às {horarioFim})</span>
+                    {hoursCalculation.lunchDeductionHours > 0 && (
+                      <span className="inline-flex items-center gap-1 text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                        <Coffee className="w-3 h-3" />
+                        Almoço 12h-13h deduzido: -{hoursCalculation.lunchDeductionHours.toFixed(1)}h
+                      </span>
+                    )}
+                  </p>
                 </div>
 
-                <div className="text-right">
-                  <span className="text-2xl font-black font-mono text-blue-300">
+                <div className="text-right self-end sm:self-center">
+                  <span className="text-2xl sm:text-3xl font-black font-mono text-blue-300">
                     {calculatedHours.toFixed(1)}h
                   </span>
-                  <span className="text-xs text-slate-400 block font-medium">
-                    ({formatHoursToHoursMinutes(calculatedHours)} a deduzir)
+                  <span className="text-[11px] text-slate-400 block font-medium">
+                    ({formatHoursToHoursMinutes(calculatedHours)} a deduzir no Banco)
                   </span>
                 </div>
               </div>
@@ -676,7 +916,7 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
                   ) : (
                     <>
                       <Printer className="w-4 h-4" />
-                      Emitir & Gerar Guia (2 Vias A4)
+                      Emitir & Imprimir (2 Vias A4)
                     </>
                   )}
                 </button>
@@ -717,7 +957,7 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
                   <FileText className="w-10 h-10 text-slate-600 mx-auto mb-2" />
                   <h4 className="text-sm font-bold text-slate-400">Nenhuma dispensa encontrada</h4>
                   <p className="text-xs text-slate-500 mt-1">
-                    Emita novas guias de dispensa na aba "Nova Guia" para registrar abatimentos.
+                    Emita novas guias de dispensa na aba "Nova Guia" para registrar abatimentos no Banco de Horas.
                   </p>
                 </div>
               ) : (
@@ -740,7 +980,7 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
                             </span>
                           </div>
                           <p className="text-xs text-slate-400 mt-0.5">
-                            Data: <span className="font-medium text-slate-300">{formatDateBR(d.data)}</span> • Horário: <span className="font-medium text-slate-300">{d.horarioInicio} às {d.horarioFim}</span> • Débito: <span className="font-bold text-rose-400">-{d.totalHoras.toFixed(1)}h</span>
+                            Data: <span className="font-medium text-slate-300">{formatDateBR(d.data)}</span> • Período: <span className="font-medium text-slate-300">{d.horarioInicio} às {d.horarioFim}</span> • Débito: <span className="font-bold text-rose-400">-{d.totalHoras.toFixed(1)}h</span>
                           </p>
                         </div>
                       </div>
@@ -752,10 +992,10 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
                             setActiveTab('print');
                           }}
                           className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-blue-400 border border-slate-700 transition-colors"
-                          title="Reimprimir Guia em 2 Vias"
+                          title="Visualizar e Imprimir Guia Oficial em 2 Vias"
                         >
                           <Printer className="w-3.5 h-3.5" />
-                          Reimprimir
+                          Imprimir 2 Vias
                         </button>
 
                         {onDeleteDispensa && (
@@ -782,17 +1022,17 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
           {/* ============================================================ */}
           {/* TAB 3: VISUALIZAÇÃO E IMPRESSÃO OFICIAL (2 VIAS A4)           */}
           {/* ============================================================ */}
-          {(activeTab === 'print' || activePrintDispensa) && (
+          {activeTab === 'print' && (
             <div className="space-y-4">
               {/* Barra de Ações de Impressão (Oculta na folha impressa) */}
               <div className="no-print p-4 rounded-xl bg-slate-800/80 border border-slate-700 flex flex-col sm:flex-row items-center justify-between gap-3">
                 <div>
                   <h4 className="text-sm font-bold text-slate-200 flex items-center gap-2">
                     <Printer className="w-4 h-4 text-emerald-400" />
-                    Layout de Impressão Oficial (2 Vias na Folha A4)
+                    Layout de Impressão Oficial Fiel à Planilha (2 Vias na Folha A4)
                   </h4>
                   <p className="text-xs text-slate-400">
-                    O documento está formatado para caber exatamente em uma única folha A4 com destaque serrilhado.
+                    O documento é impresso em formato de tabela idêntico à planilha oficial com duas vias verticais e linha pontilhada.
                   </p>
                 </div>
 
@@ -811,219 +1051,20 @@ export const SptfDispensaModal: React.FC<SptfDispensaModalProps> = ({
                     className="flex items-center gap-2 px-5 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 transition-all"
                   >
                     <Printer className="w-4 h-4" />
-                    Imprimir Guia (2 Vias)
+                    Imprimir Agora (2 Vias A4)
                   </button>
                 </div>
               </div>
 
               {/* CONTAINER DA FOLHA DE IMPRESSÃO A4 (2 VIAS IDÊNTICAS) */}
-              <div 
-                id="sptf-print-container" 
-                className="bg-white text-black p-4 sm:p-6 rounded-xl border border-slate-300 shadow-inner font-sans text-xs space-y-4 print:p-0 print:border-none print:shadow-none"
-              >
-                {activePrintDispensa ? (
-                  <>
-                    {/* ==================== 1ª VIA - SPTF ==================== */}
-                    <ViaCard 
-                      dispensa={activePrintDispensa} 
-                      viaTitle="1ª VIA - SPTF (SEÇÃO DE PESSOAL)" 
-                      viaBadge="1ª VIA - SPTF"
-                      constructionSites={constructionSites}
-                    />
-
-                    {/* Linha Serrilhada de Corte (Destaque) */}
-                    <div className="relative py-2 flex items-center justify-center">
-                      <div className="w-full border-b-2 border-dashed border-slate-400"></div>
-                      <div className="absolute bg-white px-3 text-[10px] font-bold text-slate-600 uppercase tracking-widest flex items-center gap-1">
-                        <Scissors className="w-3.5 h-3.5" />
-                        Destaque Aqui (Corte da 1ª e 2ª Via)
-                      </div>
-                    </div>
-
-                    {/* ==================== 2ª VIA - CHEFIA / SERVIDOR ==================== */}
-                    <ViaCard 
-                      dispensa={activePrintDispensa} 
-                      viaTitle="2ª VIA - CHEFIA IMEDIATA / SERVIDOR" 
-                      viaBadge="2ª VIA - CHEFIA / SERVIDOR"
-                      constructionSites={constructionSites}
-                    />
-                  </>
-                ) : (
-                  <div className="p-8 text-center text-slate-500">
-                    Nenhuma guia selecionada para impressão.
-                  </div>
-                )}
+              <div className="p-2 sm:p-6 bg-slate-100 rounded-xl border border-slate-300 shadow-inner overflow-x-auto print:p-0 print:bg-white print:border-none print:shadow-none">
+                <DispensaPrintTemplate dispensa={previewDispensa} />
               </div>
             </div>
           )}
 
         </div>
       </div>
-    </div>
-  );
-};
-
-// ============================================================================
-// COMPONENTE AUXILIAR DE VIA INDIVIDUAL (COMARA SPTF TEMPLATE)
-// ============================================================================
-interface ViaCardProps {
-  dispensa: DispensaSptfRecord;
-  viaTitle: string;
-  viaBadge: string;
-  constructionSites?: ConstructionSite[];
-}
-
-const ViaCard: React.FC<ViaCardProps> = ({ dispensa, viaTitle, viaBadge, constructionSites = [] }) => {
-  const signatures = useMemo(() => {
-    return getSignaturesForCanteiro(dispensa.secaoCanteiro, constructionSites);
-  }, [dispensa.secaoCanteiro, constructionSites]);
-
-  return (
-    <div className="sptf-via-card border-2 border-black p-3.5 bg-white text-black text-xs">
-      
-      {/* Cabeçalho Institucional Oficial */}
-      <div className="flex items-center justify-between border-b-2 border-black pb-2 mb-2.5">
-        <div className="flex items-center gap-3">
-          <ComaraLogo size="sm" showText={false} theme="light" className="h-10 w-auto" />
-          <div className="text-left">
-            <h1 className="text-[11px] font-extrabold uppercase leading-tight tracking-wider text-black">
-              COMANDO DA AERONÁUTICA
-            </h1>
-            <h2 className="text-[10px] font-bold uppercase leading-tight text-black">
-              COMISSÃO DE AEROPORTOS DA REGIÃO AMAZÔNICA - COMARA
-            </h2>
-            <h3 className="text-[9px] font-semibold uppercase leading-tight text-slate-800">
-              SEÇÃO DE PESSOAL E TRABALHADOR DE FORÇA (SPTF)
-            </h3>
-          </div>
-        </div>
-
-        <div className="text-right">
-          <div className="inline-block px-2 py-0.5 text-[9px] font-black uppercase tracking-wider bg-black text-white rounded mb-1">
-            {viaBadge}
-          </div>
-          <div className="text-[10px] font-bold font-mono text-black">
-            Nº: {dispensa.numeroGuia || 'SPTF-2026/___'}
-          </div>
-        </div>
-      </div>
-
-      {/* Título do Documento */}
-      <div className="text-center py-1 bg-slate-100 border border-black mb-2.5">
-        <h4 className="text-xs font-black uppercase tracking-widest text-black">
-          DISPENSA DE SPTF
-        </h4>
-        <span className="text-[9px] font-medium text-slate-700 uppercase">
-          Guia de Autorização e Débito no Banco de Horas
-        </span>
-      </div>
-
-      {/* Grade de Dados do Servidor e da Dispensa */}
-      <div className="border border-black divide-y divide-black mb-2.5 text-[10px]">
-        <div className="grid grid-cols-12 divide-x divide-black bg-white">
-          <div className="col-span-8 p-1.5">
-            <span className="font-bold uppercase text-[9px] block text-slate-700">NOME DO COLABORADOR:</span>
-            <span className="font-extrabold text-[11px] text-black">{dispensa.nome}</span>
-          </div>
-          <div className="col-span-4 p-1.5">
-            <span className="font-bold uppercase text-[9px] block text-slate-700">SARAM / MATRÍCULA:</span>
-            <span className="font-bold text-[11px] font-mono text-black">{dispensa.matricula}</span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-12 divide-x divide-black bg-white">
-          <div className="col-span-4 p-1.5">
-            <span className="font-bold uppercase text-[9px] block text-slate-700">SEÇÃO / CANTEIRO:</span>
-            <span className="font-bold text-[10px] text-black">{dispensa.secaoCanteiro}</span>
-          </div>
-          <div className="col-span-4 p-1.5">
-            <span className="font-bold uppercase text-[9px] block text-slate-700">DATA DA DISPENSA:</span>
-            <span className="font-bold text-[10px] text-black">{formatDateBR(dispensa.data)}</span>
-          </div>
-          <div className="col-span-4 p-1.5">
-            <span className="font-bold uppercase text-[9px] block text-slate-700">TOTAL ABATIDO:</span>
-            <span className="font-black text-[10px] text-black font-mono">
-              {dispensa.totalHoras.toFixed(1)}h ({formatHoursToHoursMinutes(dispensa.totalHoras)})
-            </span>
-          </div>
-        </div>
-
-        <div className="p-1.5 bg-white">
-          <span className="font-bold uppercase text-[9px] block text-slate-700">PERÍODO DE DISPENSA:</span>
-          <span className="font-bold text-[10px] text-black">
-            {formatDateBR(dispensa.data)} ({dispensa.horarioInicio}) A {formatDateBR(dispensa.data)} ({dispensa.horarioFim})
-          </span>
-        </div>
-
-        <div className="p-1.5 bg-white">
-          <span className="font-bold uppercase text-[9px] block text-slate-700">MOTIVO:</span>
-          <span className="font-extrabold text-[10px] text-black uppercase">{dispensa.motivo}</span>
-        </div>
-
-        {dispensa.observacoes && (
-          <div className="p-1.5 bg-slate-50">
-            <span className="font-bold uppercase text-[9px] block text-slate-700">OBSERVAÇÕES:</span>
-            <span className="text-[9px] text-black">{dispensa.observacoes}</span>
-          </div>
-        )}
-      </div>
-
-      {/* Blocos de Assinatura Dinâmicos Mapeados da Liderança do Canteiro */}
-      <div className="grid grid-cols-3 gap-2 text-center text-[9px] pt-1">
-        
-        {/* Bloco 1: Encarregado / Chefe do Canteiro */}
-        <div className="border border-black p-1.5 flex flex-col justify-between min-h-[64px] bg-slate-50/50">
-          <div>
-            <span className="font-bold uppercase text-[8.5px] block text-black">
-              {signatures.assinatura1.titulo}
-            </span>
-            <span className="text-[8px] text-slate-600 block truncate">
-              {signatures.assinatura1.nome}
-            </span>
-          </div>
-          <div className="mt-2.5 border-t border-black pt-0.5">
-            <span className="text-[7.5px] font-semibold text-slate-700 block truncate">
-              Assinatura / Visto do Canteiro
-            </span>
-          </div>
-        </div>
-
-        {/* Bloco 2: Chefe / Encarregado da DA */}
-        <div className="border border-black p-1.5 flex flex-col justify-between min-h-[64px] bg-slate-50/50">
-          <div>
-            <span className="font-bold uppercase text-[8.5px] block text-black">
-              {signatures.assinatura2.titulo}
-            </span>
-            <span className="text-[8px] text-slate-600 block truncate">
-              {signatures.assinatura2.nome}
-            </span>
-          </div>
-          <div className="mt-2.5 border-t border-black pt-0.5">
-            <span className="text-[7.5px] font-semibold text-slate-700 block truncate">
-              Visto Divisão Administrativa
-            </span>
-          </div>
-        </div>
-
-        {/* Bloco 3: Engenheiro Fiscal / RH Admin */}
-        <div className="border border-black p-1.5 flex flex-col justify-between min-h-[64px] bg-slate-50/50">
-          <div>
-            <span className="font-bold uppercase text-[8.5px] block text-black">
-              {signatures.assinatura3.titulo}
-            </span>
-            <span className="text-[8px] text-slate-600 block truncate">
-              {signatures.assinatura3.nome}
-            </span>
-          </div>
-          <div className="mt-2.5 border-t border-black pt-0.5">
-            <span className="text-[7.5px] font-semibold text-slate-700 block truncate">
-              Fiscalização / Homologação SPTF
-            </span>
-          </div>
-        </div>
-
-      </div>
-
     </div>
   );
 };
