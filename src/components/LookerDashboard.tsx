@@ -54,6 +54,7 @@ interface LookerDashboardProps {
   onViewAttachment: (attachment: Attachment, empName?: string, recordDate?: string) => void;
   onOpenImportRecordsModal?: () => void;
   onOpenQuickBatchModal?: () => void;
+  onOpenSptfDispensa?: () => void;
   onNavigateToEmployees?: () => void;
   onResetData?: () => void;
   onClearData?: () => void;
@@ -74,6 +75,7 @@ export const LookerDashboard: React.FC<LookerDashboardProps> = ({
   onViewAttachment,
   onOpenImportRecordsModal,
   onOpenQuickBatchModal,
+  onOpenSptfDispensa,
   onNavigateToEmployees,
   onResetData,
   onClearData,
@@ -387,12 +389,25 @@ export const LookerDashboard: React.FC<LookerDashboardProps> = ({
         <div className="flex flex-wrap items-center gap-2">
           {onOpenQuickBatchModal && (
             <button
+              id="btn-dash-lancamento-rapido"
               onClick={onOpenQuickBatchModal}
               className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold rounded-xl text-white bg-blue-600 hover:bg-blue-500 shadow-sm transition-all cursor-pointer"
               title="Lançamento Rápido Diário ou em Lote"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Lançamento</span>
+            </button>
+          )}
+
+          {onOpenSptfDispensa && (
+            <button
+              id="btn-dash-nova-dispensa-sptf"
+              onClick={onOpenSptfDispensa}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl text-white bg-emerald-600 hover:bg-emerald-500 shadow-sm transition-all cursor-pointer"
+              title="Emitir Guia de Dispensa de SPTF (2 Vias A4)"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Dispensa SPTF</span>
             </button>
           )}
 

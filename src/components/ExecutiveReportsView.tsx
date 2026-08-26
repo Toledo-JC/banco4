@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { Employee, TimeRecord, InsalubrityRecord, Branch, SystemConfig, AdminRole } from '../types';
+import { Employee, TimeRecord, InsalubrityRecord, Branch, SystemConfig, AdminRole, ConstructionSite } from '../types';
 import { ComaraLogo } from './ComaraLogo';
 import { InsalubrityConversionModal } from './InsalubrityConversionModal';
+import { getSignaturesForCanteiro } from '../services/canteiroService';
 import { 
   FileSpreadsheet, 
   Printer, 
@@ -33,12 +34,14 @@ interface ExecutiveReportsViewProps {
   employees: Employee[];
   records: TimeRecord[];
   insalubrityRecords: InsalubrityRecord[];
+  constructionSites?: ConstructionSite[];
   systemConfig?: SystemConfig;
   currentUserEmail?: string;
   userRole?: AdminRole;
   theme?: 'dark' | 'light';
   onSaveInsalubrityBatch?: (records: InsalubrityRecord[]) => Promise<void>;
   onNavigateToInsalubrity?: () => void;
+  onOpenSptfDispensa?: () => void;
 }
 
 type ReportType = 'BANCO_HORAS' | 'INSALUBRIDADE';
@@ -49,12 +52,14 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
   employees,
   records,
   insalubrityRecords,
+  constructionSites,
   systemConfig,
   currentUserEmail = 'coari.comara@gmail.com',
   userRole = 'SUPER_ADMIN',
   theme = 'dark',
   onSaveInsalubrityBatch,
   onNavigateToInsalubrity,
+  onOpenSptfDispensa,
 }) => {
   const isDark = theme === 'dark';
   const printRef = useRef<HTMLDivElement>(null);
@@ -72,6 +77,12 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
   const [selectedBranch, setSelectedBranch] = useState<string>('TODAS');
   const [selectedStatus, setSelectedStatus] = useState<string>('TODOS');
   const [searchQuery, setSearchQuery] = useState('');
+  
+  // Assinaturas dinâmicas baseadas no canteiro selecionado
+  const dynamicSignatures = useMemo(() => {
+    const branchCode = selectedBranch === 'TODAS' ? 'MN' : selectedBranch;
+    return getSignaturesForCanteiro(branchCode, constructionSites);
+  }, [selectedBranch, constructionSites]);
   
   // Modal de Conversão Simples -> Avançado
   const [isConversionModalOpen, setIsConversionModalOpen] = useState(false);
@@ -641,6 +652,19 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Botão de Emissão de Dispensa de SPTF */}
+          {onOpenSptfDispensa && (
+            <button
+              id="btn-report-nova-dispensa"
+              onClick={onOpenSptfDispensa}
+              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-md shadow-emerald-600/20 active:scale-98 cursor-pointer"
+              title="Emitir nova Guia de Dispensa de SPTF com 2 vias e débito em banco de horas"
+            >
+              <FileText className="w-4 h-4" />
+              <span>Nova Dispensa de SPTF</span>
+            </button>
+          )}
+
           {/* Botão de Conversão Simples -> Avançado (para perfis gestor/admin) */}
           {reportType === 'INSALUBRIDADE' && isAdvancedUser && onSaveInsalubrityBatch && (
             <button
@@ -1332,17 +1356,30 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
           </div>
         )}
 
-        {/* Rodapé Oficial de Assinatura COMARA */}
-        <div className="mt-12 pt-8 border-t border-slate-700 print:border-slate-300 grid grid-cols-2 gap-8 text-center text-xs">
+        {/* Rodapé Oficial de Assinatura COMARA (3 Vias Dinâmicas) */}
+        <div className="mt-12 pt-8 border-t border-slate-700 print:border-slate-300 grid grid-cols-1 sm:grid-cols-3 gap-6 text-center text-xs print:grid-cols-3">
+          {/* 1. Liderança de Canteiro */}
           <div className="space-y-1">
-            <div className="w-48 h-0.5 bg-slate-500 mx-auto mb-2"></div>
-            <div className="font-bold">Chefe da Seção de Pessoal / RH</div>
-            <div className="text-[10px] text-slate-400 print:text-slate-600">COMARA • Sede Regional</div>
+            <div className="w-40 h-0.5 bg-slate-500 mx-auto mb-2"></div>
+            <div className="font-bold">{dynamicSignatures.assinatura1.titulo}</div>
+            <div className="text-[11px] font-semibold text-slate-300 print:text-slate-800">{dynamicSignatures.assinatura1.nome}</div>
+            <div className="text-[9px] text-slate-400 print:text-slate-600">{dynamicSignatures.assinatura1.subtitulo}</div>
           </div>
+
+          {/* 2. Divisão Administrativa */}
           <div className="space-y-1">
-            <div className="w-48 h-0.5 bg-slate-500 mx-auto mb-2"></div>
-            <div className="font-bold">Chefe de Canteiro / Fiscal de Obras</div>
-            <div className="text-[10px] text-slate-400 print:text-slate-600">COMARA • Destacamento Operacional</div>
+            <div className="w-40 h-0.5 bg-slate-500 mx-auto mb-2"></div>
+            <div className="font-bold">{dynamicSignatures.assinatura2.titulo}</div>
+            <div className="text-[11px] font-semibold text-slate-300 print:text-slate-800">{dynamicSignatures.assinatura2.nome}</div>
+            <div className="text-[9px] text-slate-400 print:text-slate-600">{dynamicSignatures.assinatura2.subtitulo}</div>
+          </div>
+
+          {/* 3. Seção de Pessoal / RH / Fiscal */}
+          <div className="space-y-1">
+            <div className="w-40 h-0.5 bg-slate-500 mx-auto mb-2"></div>
+            <div className="font-bold">{dynamicSignatures.assinatura3.titulo}</div>
+            <div className="text-[11px] font-semibold text-slate-300 print:text-slate-800">{dynamicSignatures.assinatura3.nome}</div>
+            <div className="text-[9px] text-slate-400 print:text-slate-600">{dynamicSignatures.assinatura3.subtitulo}</div>
           </div>
         </div>
       </div>

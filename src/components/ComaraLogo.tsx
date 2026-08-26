@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-interface ComaraLogoProps {
+export interface LogoComaraProps {
   logoUrl?: string;
   size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
   showText?: boolean;
@@ -8,9 +8,15 @@ interface ComaraLogoProps {
   theme?: 'dark' | 'light';
   className?: string;
   onClick?: () => void;
+  altText?: string;
 }
 
-export const ComaraLogo: React.FC<ComaraLogoProps> = ({
+/**
+ * Componente Institucional de Logo da COMARA
+ * Otimizado para suportar PNGs com fundo transparente, ajustando contraste,
+ * saturação e drop-shadow de acordo com o tema (Claro/Escuro).
+ */
+export const LogoComara: React.FC<LogoComaraProps> = ({
   logoUrl = '/comara-logo.png',
   size = 'md',
   showText = false,
@@ -18,17 +24,18 @@ export const ComaraLogo: React.FC<ComaraLogoProps> = ({
   theme = 'dark',
   className = '',
   onClick,
+  altText = 'Brasão Oficial COMARA'
 }) => {
   const isDark = theme === 'dark';
   const [imageError, setImageError] = useState(false);
 
-  // Size mapping for the insignia / emblem (flat top, rounded bottom)
+  // Mapeamento proporcional de tamanhos
   const sizeClasses = {
-    sm: 'h-8 w-auto max-h-8',
-    md: 'h-10 w-auto max-h-10',
-    lg: 'h-14 w-auto max-h-14',
-    xl: 'h-20 w-auto max-h-20',
-    '2xl': 'h-28 w-auto max-h-28',
+    sm: 'h-8 w-auto max-h-8 min-w-[32px]',
+    md: 'h-10 w-auto max-h-10 min-w-[40px]',
+    lg: 'h-14 w-auto max-h-14 min-w-[56px]',
+    xl: 'h-20 w-auto max-h-20 min-w-[80px]',
+    '2xl': 'h-28 w-auto max-h-28 min-w-[112px]',
   };
 
   const textSizes = {
@@ -42,6 +49,13 @@ export const ComaraLogo: React.FC<ComaraLogoProps> = ({
   const effectiveLogoUrl = (logoUrl && logoUrl.trim().length > 0) ? logoUrl : '/comara-logo.png';
   const hasCustomImage = Boolean(effectiveLogoUrl && !imageError);
 
+  // Ajustes ópticos e de contraste dinâmico para PNG transparente:
+  // - Em tema escuro: adiciona leve brilho/drop-shadow para destacar detalhes sobre fundos pretos/grafite.
+  // - Em tema claro: adiciona contraste nítido e preserva a pureza das cores institucionais da FAB.
+  const imageContrastClasses = isDark 
+    ? 'brightness-105 contrast-110 drop-shadow-[0_2px_8px_rgba(255,255,255,0.12)]' 
+    : 'brightness-100 contrast-105 drop-shadow-[0_2px_4px_rgba(0,0,0,0.15)]';
+
   return (
     <div 
       className={`inline-flex items-center gap-3 select-none ${onClick ? 'cursor-pointer' : ''} ${className}`}
@@ -52,72 +66,71 @@ export const ComaraLogo: React.FC<ComaraLogoProps> = ({
         <div className="relative shrink-0 flex items-center justify-center">
           <img
             src={effectiveLogoUrl}
-            alt="Brasão Oficial COMARA"
-            className={`${sizeClasses[size]} object-contain drop-shadow-md transition-transform hover:scale-105 filter`}
+            alt={altText}
+            className={`${sizeClasses[size]} object-contain transition-all duration-200 hover:scale-105 ${imageContrastClasses}`}
             referrerPolicy="no-referrer"
             onError={() => setImageError(true)}
           />
         </div>
       ) : (
-        /* Vector Emblem for COMARA (Aeronautical Wings & Star Insignia) */
+        /* Brasão e Insígnia Vetorial da Aeronáutica / COMARA com Asas Douradas */
         <div className={`relative shrink-0 flex items-center justify-center rounded-xl shadow-md transition-transform group-hover:scale-105 ${
           sizeClasses[size]
         } bg-gradient-to-br from-[#0B2545] via-[#134074] to-[#00509D] text-white border ${
           isDark ? 'border-blue-400/30 shadow-blue-900/30' : 'border-blue-700/20 shadow-blue-500/20'
         }`}>
-          {/* Stylized Aeronautical Wings SVG */}
           <svg viewBox="0 0 40 40" className="w-4/5 h-4/5" fill="none" xmlns="http://www.w3.org/2000/svg">
             <defs>
-              <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <linearGradient id="goldGradLogo" x1="0%" y1="0%" x2="100%" y2="100%">
                 <stop offset="0%" stopColor="#F59E0B" />
                 <stop offset="50%" stopColor="#FDE047" />
                 <stop offset="100%" stopColor="#D97706" />
               </linearGradient>
-              <linearGradient id="wingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <linearGradient id="wingGradLogo" x1="0%" y1="0%" x2="100%" y2="100%">
                 <stop offset="0%" stopColor="#93C5FD" />
                 <stop offset="100%" stopColor="#60A5FA" />
               </linearGradient>
             </defs>
 
-            {/* Left Wing */}
+            {/* Asa Esquerda */}
             <path
               d="M 17 21 C 12 17 6 16 2 17 C 7 19 12 21 16 25 Z"
-              fill="url(#wingGrad)"
+              fill="url(#wingGradLogo)"
               opacity="0.9"
             />
             <path
               d="M 18 24 C 13 22 7 21 4 23 C 8 24 13 25 17 28 Z"
-              fill="url(#wingGrad)"
+              fill="url(#wingGradLogo)"
               opacity="0.75"
             />
 
-            {/* Right Wing */}
+            {/* Asa Direita */}
             <path
               d="M 23 21 C 28 17 34 16 38 17 C 33 19 28 21 24 25 Z"
-              fill="url(#wingGrad)"
+              fill="url(#wingGradLogo)"
               opacity="0.9"
             />
             <path
               d="M 22 24 C 27 22 33 21 36 23 C 32 24 27 25 23 28 Z"
-              fill="url(#wingGrad)"
+              fill="url(#wingGradLogo)"
               opacity="0.75"
             />
 
-            {/* Central Shield */}
+            {/* Escudo Central */}
             <path
               d="M 20 8 L 26 13 L 26 23 C 26 28 20 32 20 32 C 20 32 14 28 14 23 L 14 13 Z"
               fill="#0B2545"
-              stroke="url(#goldGrad)"
+              stroke="url(#goldGradLogo)"
               strokeWidth="1.2"
             />
 
-            {/* Aeronautical Star */}
+            {/* Estrela Aeronáutica */}
             <polygon
               points="20,11 21.5,15 25.5,15 22.2,17.5 23.5,21.5 20,19 16.5,21.5 17.8,17.5 14.5,15 18.5,15"
-              fill="url(#goldGrad)"
+              fill="url(#goldGradLogo)"
             />
 
-            {/* Center Runway Compass Lines */}
+            {/* Linhas de Pista / Bússola */}
             <line x1="20" y1="22" x2="20" y2="28" stroke="#60A5FA" strokeWidth="1" strokeDasharray="1 1" />
           </svg>
         </div>
@@ -151,3 +164,7 @@ export const ComaraLogo: React.FC<ComaraLogoProps> = ({
     </div>
   );
 };
+
+// Aliases para compatibilidade total em todas as importações
+export const ComaraLogo = LogoComara;
+export default LogoComara;

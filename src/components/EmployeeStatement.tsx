@@ -48,6 +48,7 @@ interface EmployeeStatementProps {
   onSelectMatricula: (matricula: string) => void;
   onBack: () => void;
   onOpenNewEntry: (matricula: string) => void;
+  onOpenSptfDispensa?: (matricula: string) => void;
   onOpenEditEntry?: (record: TimeRecord) => void;
   onDeleteRecord?: (id: string) => void | Promise<void>;
   onViewAttachment: (attachment: Attachment, empName?: string, recordDate?: string) => void;
@@ -64,6 +65,7 @@ export const EmployeeStatement: React.FC<EmployeeStatementProps> = ({
   onSelectMatricula,
   onBack,
   onOpenNewEntry,
+  onOpenSptfDispensa,
   onOpenEditEntry,
   onDeleteRecord,
   onViewAttachment,
@@ -239,11 +241,23 @@ export const EmployeeStatement: React.FC<EmployeeStatementProps> = ({
 
           <button
             onClick={() => onOpenNewEntry(currentEmployee.matricula)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#3B82F6] hover:bg-blue-600 rounded-lg transition-all shadow-md shadow-blue-500/20 active:scale-98"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-[#3B82F6] hover:bg-blue-600 rounded-lg transition-all shadow-md shadow-blue-500/20 active:scale-98 cursor-pointer"
           >
             <PlusCircle className="w-3.5 h-3.5" />
             <span>Lançar Ocorrência</span>
           </button>
+
+          {onOpenSptfDispensa && (
+            <button
+              id="btn-statement-dispensa-sptf"
+              onClick={() => onOpenSptfDispensa(currentEmployee.matricula)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-all shadow-md shadow-emerald-500/20 active:scale-98 cursor-pointer"
+              title="Emitir Guia de Dispensa de SPTF (2 Vias A4) para este colaborador"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Emitir Dispensa SPTF</span>
+            </button>
+          )}
         </div>
       </div>
 

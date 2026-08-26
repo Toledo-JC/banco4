@@ -13,17 +13,21 @@ import {
   Unsubscribe 
 } from 'firebase/firestore';
 import { db, logFirestoreError, handleFirestoreError, OperationType, isPermissionError } from './firebase';
-import { Employee, TimeRecord, AdminUser, AdminRole, InsalubrityRecord, SystemConfig, ConstructionSite, PaystubRecord } from '../types';
+import { Employee, TimeRecord, AdminUser, AdminRole, InsalubrityRecord, SystemConfig, ConstructionSite, PaystubRecord, DispensaSptfRecord, AuditLog } from '../types';
 import { hashPassword } from './authService';
 import { canteiroService } from './canteiroService';
+import { auditService, RegisterAuditParams } from './auditService';
 
 export const COLLECTIONS = {
   COLABORADORES: 'colaboradores',
   LANCAMENTOS: 'lancamentos',
+  DISPENSAS_SPTF: 'dispensas_sptf',
   ADMIN_USERS: 'admin_users',
+  USUARIOS_SISTEMA: 'usuarios_sistema',
   RESUMO_MENSAL: 'resumo_mensal',
   COLABORADORES_AUTH: 'colaboradores_auth',
   SYSTEM_LOGS: 'system_logs',
+  LOGS_AUDITORIA: 'logs_auditoria',
   INSALUBRIDADE: 'insalubridade_records',
   SYSTEM_CONFIG: 'system_config',
   CANTEIROS: 'canteiros_obras',
@@ -131,6 +135,35 @@ export function preparePaystubForFirestore(p: Partial<PaystubRecord>): Record<st
     importadoEm: p.importadoEm || new Date().toISOString(),
     importadoPorEmail: p.importadoPorEmail || '',
     observacoes: p.observacoes || ''
+  });
+}
+
+// Higienizador robusto com valores padrão garantidos para Guias de Dispensa de SPTF
+export function prepareDispensaSptfForFirestore(d: Partial<DispensaSptfRecord>): Record<string, any> {
+  const docId = d.id || `dispensa_${Date.now()}_${d.matricula || 'MAT'}`;
+  const now = new Date();
+  const ano = now.getFullYear();
+  const randomSeq = Math.floor(1000 + Math.random() * 9000);
+  const numeroGuia = d.numeroGuia || `SPTF-${ano}/${randomSeq}`;
+
+  return sanitizeFirestoreData({
+    id: docId,
+    numeroGuia: numeroGuia,
+    matricula: (d.matricula || '').trim().toUpperCase(),
+    nome: (d.nome || '').trim(),
+    saram: (d.saram || d.matricula || '').trim().toUpperCase(),
+    secaoCanteiro: (d.secaoCanteiro || 'DECO-KO').trim(),
+    data: d.data || now.toISOString().split('T')[0],
+    horarioInicio: d.horarioInicio || '13:00',
+    horarioFim: d.horarioFim || '16:00',
+    totalHoras: Number(d.totalHoras || 0),
+    motivo: (d.motivo || 'COMPENSAÇÃO BANCO DE HORAS').trim(),
+    observacoes: d.observacoes || '',
+    emitidoPorNome: d.emitidoPorNome || '',
+    emitidoPorEmail: d.emitidoPorEmail || '',
+    emitidoEm: d.emitidoEm || now.toISOString(),
+    lancamentoId: d.lancamentoId || '',
+    status: d.status || 'EMITIDA',
   });
 }
 
@@ -865,12 +898,22 @@ export const firestoreService = {
         nivelAcesso: adminUser.nivelAcesso || adminUser.role || 'GESTOR_RH',
         sede: adminUser.sede || 'TODAS',
         ativo: adminUser.ativo !== false,
+        desativacaoAgendada: adminUser.desativacaoAgendada || null,
+        transicaoStatus: adminUser.transicaoStatus || (adminUser.desativacaoAgendada ? 'PENDENTE_48H' : 'ATIVO'),
+        canteiroCodigo: adminUser.canteiroCodigo || '',
+        tratamentoTitulo: adminUser.tratamentoTitulo || 'Chefe',
+        criadoEm: adminUser.criadoEm || new Date().toISOString(),
         atualizadoEm: new Date().toISOString(),
       };
       if (adminUser.passwordHash) {
         dataToSave.passwordHash = adminUser.passwordHash;
       }
-      await setDoc(doc(db, COLLECTIONS.ADMIN_USERS, docId), dataToSave, { merge: true });
+      
+      // Salva de forma sincronizada na coleção usuarios_sistema e admin_users (estritamente separadas de colaboradores)
+      await Promise.all([
+        setDoc(doc(db, COLLECTIONS.ADMIN_USERS, docId), dataToSave, { merge: true }),
+        setDoc(doc(db, COLLECTIONS.USUARIOS_SISTEMA, docId), dataToSave, { merge: true })
+      ]);
     } catch (error) {
       logFirestoreError(error, OperationType.WRITE, path);
       throw error;
@@ -878,9 +921,13 @@ export const firestoreService = {
   },
 
   async deleteAdminUser(docId: string): Promise<void> {
-    const path = `${COLLECTIONS.ADMIN_USERS}/${docId}`;
+    const cleanId = docId.trim().toLowerCase();
+    const path = `${COLLECTIONS.ADMIN_USERS}/${cleanId}`;
     try {
-      await deleteDoc(doc(db, COLLECTIONS.ADMIN_USERS, docId));
+      await Promise.all([
+        deleteDoc(doc(db, COLLECTIONS.ADMIN_USERS, cleanId)),
+        deleteDoc(doc(db, COLLECTIONS.USUARIOS_SISTEMA, cleanId))
+      ]);
     } catch (error) {
       logFirestoreError(error, OperationType.DELETE, path);
       throw error;
@@ -888,8 +935,20 @@ export const firestoreService = {
   },
 
   // -------------------------------------------------------------
-  // SYSTEM AUDIT LOGS
+  // SISTEMA DE AUDITORIA E LOGS DE ALTERAÇÃO (AUDIT TRAIL)
   // -------------------------------------------------------------
+
+  subscribeAuditLogs(
+    onSuccess: (logs: AuditLog[]) => void,
+    onError?: (error: Error) => void,
+    maxLimit: number = 300
+  ): Unsubscribe {
+    return auditService.subscribeAuditLogs(onSuccess, onError, maxLimit);
+  },
+
+  async logAuditEvent(params: RegisterAuditParams): Promise<void> {
+    return auditService.logAction(params);
+  },
 
   async logSystemEvent(event: {
     tipo: string;
@@ -1061,6 +1120,130 @@ export const firestoreService = {
       await deleteDoc(doc(db, COLLECTIONS.CONTRACHEQUES, id));
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, path);
+    }
+  },
+
+  // -------------------------------------------------------------
+  // DISPENSAS DE SPTF (EMISSÃO EM 2 VIAS E DÉBITO AUTOMÁTICO)
+  // -------------------------------------------------------------
+
+  subscribeDispensasSptf(
+    onSuccess: (dispensas: DispensaSptfRecord[]) => void,
+    onError?: (error: Error) => void
+  ): Unsubscribe {
+    const path = COLLECTIONS.DISPENSAS_SPTF;
+    try {
+      return onSnapshot(
+        collection(db, path),
+        (snapshot) => {
+          try {
+            const list: DispensaSptfRecord[] = [];
+            snapshot.forEach((docSnap) => {
+              const data = docSnap.data();
+              list.push({
+                id: docSnap.id,
+                numeroGuia: data.numeroGuia || '',
+                matricula: (data.matricula || '').toString().trim().toUpperCase(),
+                nome: data.nome || '',
+                saram: data.saram || data.matricula || '',
+                secaoCanteiro: data.secaoCanteiro || 'DECO-KO',
+                data: data.data || '',
+                horarioInicio: data.horarioInicio || '13:00',
+                horarioFim: data.horarioFim || '16:00',
+                totalHoras: typeof data.totalHoras === 'number' ? data.totalHoras : (Number(data.totalHoras) || 0),
+                motivo: data.motivo || 'COMPENSAÇÃO BANCO DE HORAS',
+                observacoes: data.observacoes || '',
+                emitidoPorNome: data.emitidoPorNome || '',
+                emitidoPorEmail: data.emitidoPorEmail || '',
+                emitidoEm: data.emitidoEm || '',
+                lancamentoId: data.lancamentoId || '',
+                status: data.status || 'EMITIDA',
+              });
+            });
+
+            // Ordenar por emissão mais recente
+            list.sort((a, b) => (b.emitidoEm || b.data || '').localeCompare(a.emitidoEm || a.data || ''));
+            onSuccess(list);
+          } catch (err: any) {
+            console.error('Erro ao processar snapshot de dispensas SPTF:', err);
+            if (onError) onError(err);
+          }
+        },
+        (error) => {
+          logFirestoreError(error, OperationType.LIST, path);
+          if (onError) onError(error);
+        }
+      );
+    } catch (error: any) {
+      logFirestoreError(error, OperationType.LIST, path);
+      if (onError) onError(error);
+      return () => {};
+    }
+  },
+
+  async emitDispensaSptf(
+    dispensa: DispensaSptfRecord,
+    record: TimeRecord,
+    userEmail?: string
+  ): Promise<void> {
+    const batch = writeBatch(db);
+
+    // 1. Sanitizar dados do lançamento de débito no Banco de Horas
+    const lancRef = doc(db, COLLECTIONS.LANCAMENTOS, record.id);
+    const cleanRecord = sanitizeFirestoreData({
+      id: record.id,
+      matricula: (record.matricula || '').trim().toUpperCase(),
+      employeeName: record.employeeName || '',
+      employeeSede: record.employeeSede || 'KO',
+      employeeFuncao: record.employeeFuncao || 'Técnico de Manutenção',
+      employeeAvatarUrl: record.employeeAvatarUrl || '',
+      dataRegistro: record.dataRegistro || '',
+      data_ocorrencia: record.data_ocorrencia || record.dataRegistro || '',
+      tipoOcorrencia: 'COMPENSACAO_DISPENSA',
+      horasBrutas: Number(record.horasBrutas) || 0,
+      multiplicador: 1.0,
+      saldoCalculado: -(Number(record.horasBrutas) || 0),
+      saldo_remanescente: 0,
+      status_compensacao: 'TOTALMENTE_COMPENSADO',
+      liquidacoes: [],
+      eFeriado: false,
+      diaSemana: Number(record.diaSemana) || 1,
+      diaSemanaNome: record.diaSemanaNome || '',
+      observacao: record.observacao || `Dispensa de SPTF Nº ${dispensa.numeroGuia || ''} (${dispensa.horarioInicio} às ${dispensa.horarioFim})`,
+      criadoEm: record.criadoEm || new Date().toISOString(),
+      criadoPorEmail: userEmail || record.criadoPorEmail || '',
+      atualizadoEm: new Date().toISOString(),
+    });
+    batch.set(lancRef, cleanRecord, { merge: true });
+
+    // 2. Sanitizar dados da Guia de Dispensa de SPTF
+    const dispensaRef = doc(db, COLLECTIONS.DISPENSAS_SPTF, dispensa.id);
+    const cleanDispensa = prepareDispensaSptfForFirestore({
+      ...dispensa,
+      lancamentoId: record.id,
+      emitidoPorEmail: userEmail || dispensa.emitidoPorEmail,
+    });
+    batch.set(dispensaRef, cleanDispensa, { merge: true });
+
+    try {
+      await batch.commit();
+    } catch (error) {
+      logFirestoreError(error, OperationType.WRITE, COLLECTIONS.DISPENSAS_SPTF);
+      throw error;
+    }
+  },
+
+  async deleteDispensaSptf(dispensaId: string, lancamentoId?: string): Promise<void> {
+    const batch = writeBatch(db);
+    batch.delete(doc(db, COLLECTIONS.DISPENSAS_SPTF, dispensaId));
+    if (lancamentoId) {
+      batch.delete(doc(db, COLLECTIONS.LANCAMENTOS, lancamentoId));
+    }
+    try {
+      await batch.commit();
+    } catch (error) {
+      logFirestoreError(error, OperationType.DELETE, COLLECTIONS.DISPENSAS_SPTF);
+      throw error;
     }
   },
 

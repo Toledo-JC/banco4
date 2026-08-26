@@ -60,15 +60,17 @@
     },
     "AdminUser": {
       "title": "AdminUser",
-      "description": "Usuários de gestão e RH autorizados com controle de acesso RBAC",
+      "description": "Usuários de gestão e acessos ao sistema com RBAC e carência de transição de 48h",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
         "email": { "type": "string", "maxLength": 150 },
         "nome": { "type": "string", "maxLength": 150 },
-        "role": { "type": "string", "enum": ["SUPER_ADMIN", "GESTOR_RH", "AUDITOR"] },
+        "role": { "type": "string", "enum": ["SUPER_ADMIN", "GESTOR_RH", "AUDITOR", "AUX_DA", "CHEFE_CANTEIRO", "ENCARREGADO_CANTEIRO", "CHEFE_DA", "ENCARREGADO_DA", "GERENTE", "ROLE_GERENTE", "GERENTE_CAMPO"] },
         "sede": { "type": "string", "enum": ["KO", "BE", "MN", "TODAS"] },
         "ativo": { "type": "boolean" },
+        "desativacaoAgendada": { "type": "string", "maxLength": 50 },
+        "transicaoStatus": { "type": "string", "enum": ["PENDENTE_48H", "EXPIRADO", "ATIVO"] },
         "criadoEm": { "type": "string", "maxLength": 50 },
         "atualizadoEm": { "type": "string", "maxLength": 50 }
       },
@@ -126,6 +128,46 @@
         "criadoEm": { "type": "string", "maxLength": 50 }
       },
       "required": ["id", "matricula", "nome", "periodo", "mesAno", "valorLiquido"]
+    },
+    "DispensaSptf": {
+      "title": "DispensaSptf",
+      "description": "Guias de Dispensa de SPTF emitidas com débito no banco de horas e layout de 2 vias A4",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "numeroGuia": { "type": "string", "maxLength": 64 },
+        "matricula": { "type": "string", "maxLength": 64 },
+        "nome": { "type": "string", "maxLength": 200 },
+        "saram": { "type": "string", "maxLength": 64 },
+        "secaoCanteiro": { "type": "string", "maxLength": 150 },
+        "data": { "type": "string", "maxLength": 20 },
+        "horarioInicio": { "type": "string", "maxLength": 10 },
+        "horarioFim": { "type": "string", "maxLength": 10 },
+        "totalHoras": { "type": "number" },
+        "motivo": { "type": "string", "maxLength": 300 },
+        "observacoes": { "type": "string", "maxLength": 1000 },
+        "emitidoPorNome": { "type": "string", "maxLength": 150 },
+        "emitidoPorEmail": { "type": "string", "maxLength": 150 },
+        "emitidoEm": { "type": "string", "maxLength": 50 },
+        "lancamentoId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["EMITIDA", "CANCELADA"] }
+      },
+      "required": ["id", "matricula", "nome", "data", "horarioInicio", "horarioFim", "totalHoras", "motivo"]
+    },
+    "LogAuditoria": {
+      "title": "LogAuditoria",
+      "description": "Trilha de auditoria e registro de alterações críticas no sistema (edições, dispensas, insalubridade, chefias)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "usuarioId": { "type": "string", "maxLength": 150 },
+        "nomeUsuario": { "type": "string", "maxLength": 200 },
+        "acao": { "type": "string", "maxLength": 100 },
+        "detalhes": { "type": "string", "maxLength": 2000 },
+        "canteiroId": { "type": "string", "maxLength": 50 },
+        "timestamp": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "usuarioId", "nomeUsuario", "acao", "detalhes", "canteiroId", "timestamp"]
     }
   },
   "firestore": {
@@ -137,9 +179,17 @@
       "schema": "Lancamento",
       "description": "Coleção central de lançamentos diários e compensações FIFO"
     },
+    "/dispensas_sptf/{dispensaId}": {
+      "schema": "DispensaSptf",
+      "description": "Coleção de guias e emissões de Dispensa de SPTF da COMARA"
+    },
     "/admin_users/{adminUserId}": {
       "schema": "AdminUser",
       "description": "Perfis de permissões e controle de acesso RBAC"
+    },
+    "/usuarios_sistema/{usuarioId}": {
+      "schema": "AdminUser",
+      "description": "Coleção dedicada aos usuários e operadores do sistema com controle de acessos"
     },
     "/colaboradores_auth/{matriculaId}": {
       "schema": "ColaboradorAuth",
@@ -152,6 +202,10 @@
     "/contracheques/{contrachequeId}": {
       "schema": "Contracheque",
       "description": "Coleção de contracheques digitais extraídos do PDF oficial da folha"
+    },
+    "/logs_auditoria/{auditId}": {
+      "schema": "LogAuditoria",
+      "description": "Trilha de auditoria e registro imutável de ações críticas no sistema"
     }
   }
 }

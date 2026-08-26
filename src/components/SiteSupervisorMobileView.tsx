@@ -22,7 +22,8 @@ import {
   Calendar,
   ChevronDown,
   ChevronUp,
-  Info
+  Info,
+  FileText
 } from 'lucide-react';
 
 interface SiteSupervisorMobileViewProps {
@@ -32,6 +33,7 @@ interface SiteSupervisorMobileViewProps {
   onToggleTheme?: () => void;
   onLogout?: () => void;
   currentUser?: any;
+  onOpenSptfDispensa?: (matricula?: string) => void;
 }
 
 type SortOption = 'DEVEDORES' | 'CREDORES' | 'ALFABETICA';
@@ -43,6 +45,7 @@ export const SiteSupervisorMobileView: React.FC<SiteSupervisorMobileViewProps> =
   onToggleTheme,
   onLogout,
   currentUser,
+  onOpenSptfDispensa,
 }) => {
   const isDark = theme === 'dark';
 
@@ -135,13 +138,26 @@ export const SiteSupervisorMobileView: React.FC<SiteSupervisorMobileViewProps> =
     return { total, credores, devedores, zerados, saldoGeral, saldoGeralDias };
   }, [calculatedList]);
 
+  const roleLabel = useMemo(() => {
+    if (currentUser?.tratamentoTitulo) {
+      return `${currentUser.tratamentoTitulo} de Canteiro`;
+    }
+    const r = currentUser?.role || currentUser?.role_acesso || '';
+    if (r === 'ENCARREGADO_CANTEIRO') return 'Encarregado de Canteiro';
+    if (r === 'CHEFE_DA') return 'Chefe da Divisão Administrativa';
+    if (r === 'ENCARREGADO_DA') return 'Encarregado da DA';
+    if (r === 'AUX_DA') return 'Auxiliar da Divisão Administrativa';
+    if (r === 'GERENTE') return 'Engenheiro Fiscal / Gerente';
+    return 'Chefe de Canteiro';
+  }, [currentUser]);
+
   return (
     <div className={`min-h-screen pb-12 font-sans transition-colors duration-200 ${
       isDark ? 'bg-[#0B0D11] text-[#E0E2E5]' : 'bg-slate-100 text-slate-900'
     }`}>
       
       {/* ========================================================================= */}
-      {/* 1. APP BAR SUPERIOR MOBILE-FIRST (CHEFE DE CANTEIRO)                      */}
+      {/* 1. APP BAR SUPERIOR MOBILE-FIRST (CHEFE DE CANTEIRO / AUX DA)             */}
       {/* ========================================================================= */}
       <header className={`sticky top-0 z-30 px-4 py-3 border-b backdrop-blur-md transition-all ${
         isDark 
@@ -158,7 +174,7 @@ export const SiteSupervisorMobileView: React.FC<SiteSupervisorMobileViewProps> =
                   {currentUser?.nome || 'Chefe de Canteiro'}
                 </h1>
                 <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-400 border border-amber-500/30 shrink-0">
-                  Canteiro
+                  {roleLabel}
                 </span>
               </div>
               <p className={`text-[10px] truncate ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
@@ -168,6 +184,18 @@ export const SiteSupervisorMobileView: React.FC<SiteSupervisorMobileViewProps> =
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {onOpenSptfDispensa && (
+              <button
+                onClick={() => onOpenSptfDispensa()}
+                title="Emitir Dispensa de SPTF"
+                className="px-2.5 py-1.5 rounded-xl border border-amber-500/40 bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 transition-all text-xs font-bold flex items-center gap-1 cursor-pointer shadow-xs"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Nova Dispensa</span>
+                <span className="sm:hidden">SPTF</span>
+              </button>
+            )}
+
             {onToggleTheme && (
               <button
                 onClick={onToggleTheme}
@@ -572,6 +600,26 @@ export const SiteSupervisorMobileView: React.FC<SiteSupervisorMobileViewProps> =
                           </div>
                         </div>
                       )}
+                      {/* Ações Rápidas do Colaborador no Canteiro */}
+                      <div className="pt-2 border-t flex items-center justify-between gap-2 flex-wrap">
+                        {onOpenSptfDispensa && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenSptfDispensa(emp.matricula);
+                            }}
+                            className={`w-full py-2 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-2 border transition-all cursor-pointer ${
+                              isDark
+                                ? 'bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/25'
+                                : 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100 shadow-xs'
+                            }`}
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>Emitir Dispensa de SPTF (2 Vias A4)</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )}
 

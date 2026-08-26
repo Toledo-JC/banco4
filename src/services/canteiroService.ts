@@ -11,7 +11,7 @@ import {
   Unsubscribe 
 } from 'firebase/firestore';
 import { db, logFirestoreError, OperationType } from './firebase';
-import { ConstructionSite } from '../types';
+import { ConstructionSite, CanteiroSignatures, TratamentoTitulo } from '../types';
 import { sanitizeFirestoreData } from './firestoreService';
 
 export const CANTEIROS_COLLECTION = 'canteiros_obras';
@@ -33,8 +33,12 @@ export const BASE_SEDES_CANTEIROS: ConstructionSite[] = [
     endereco: 'Aeroporto de Coari - Coari / AM',
     chief: 'Capitão Encarregado de Obras',
     chefeCanteiro: 'Capitão Encarregado de Obras',
+    tratamentoChefeCanteiro: 'Encarregado',
     chiefContact: '(92) 99123-4567',
     chefeContato: '(92) 99123-4567',
+    chefeDa: 'Chefe da Divisão Administrativa',
+    tratamentoChefeDa: 'Chefe',
+    auxDa: 'Auxiliar da Divisão Administrativa',
     manager: 'Fiscal de Obras COMARA',
     gerente: 'Fiscal de Obras COMARA',
     status: 'Ativo',
@@ -56,10 +60,14 @@ export const BASE_SEDES_CANTEIROS: ConstructionSite[] = [
     sede: 'BE',
     address: 'Av. Pedro Álvares Cabral, 7115 - Belém / PA',
     endereco: 'Av. Pedro Álvares Cabral, 7115 - Belém / PA',
-    chief: 'Chefe da Divisão Administrativa',
-    chefeCanteiro: 'Chefe da Divisão Administrativa',
+    chief: 'Chefe da Divisão de Obras',
+    chefeCanteiro: 'Chefe da Divisão de Obras',
+    tratamentoChefeCanteiro: 'Chefe',
     chiefContact: '(91) 3214-5000',
     chefeContato: '(91) 3214-5000',
+    chefeDa: 'Chefe da Divisão Administrativa',
+    tratamentoChefeDa: 'Chefe',
+    auxDa: 'Auxiliar de Administração Belém',
     manager: 'Comandante da COMARA',
     gerente: 'Comandante da COMARA',
     status: 'Ativo',
@@ -83,8 +91,12 @@ export const BASE_SEDES_CANTEIROS: ConstructionSite[] = [
     endereco: 'Base Aérea de Manaus - Manaus / AM',
     chief: 'Chefe do Destacamento Manaus',
     chefeCanteiro: 'Chefe do Destacamento Manaus',
+    tratamentoChefeCanteiro: 'Chefe',
     chiefContact: '(92) 3629-1000',
     chefeContato: '(92) 3629-1000',
+    chefeDa: 'Chefe da DA Manaus',
+    tratamentoChefeDa: 'Chefe',
+    auxDa: 'Auxiliar DA Manaus',
     manager: 'Gestor Operacional',
     gerente: 'Gestor Operacional',
     status: 'Ativo',
@@ -108,8 +120,11 @@ export const BASE_SEDES_CANTEIROS: ConstructionSite[] = [
     endereco: 'São Paulo / SP',
     chief: 'Representante Regional SP',
     chefeCanteiro: 'Representante Regional SP',
+    tratamentoChefeCanteiro: 'Encarregado',
     chiefContact: '(11) 3300-0000',
     chefeContato: '(11) 3300-0000',
+    chefeDa: 'Divisão Administrativa Regional',
+    tratamentoChefeDa: 'Chefe',
     manager: 'Gestor Administrativo',
     gerente: 'Gestor Administrativo',
     status: 'Ativo',
@@ -133,8 +148,11 @@ export const BASE_SEDES_CANTEIROS: ConstructionSite[] = [
     endereco: 'Rio de Janeiro / RJ',
     chief: 'Representante Regional RJ',
     chefeCanteiro: 'Representante Regional RJ',
+    tratamentoChefeCanteiro: 'Encarregado',
     chiefContact: '(21) 2200-0000',
     chefeContato: '(21) 2200-0000',
+    chefeDa: 'Divisão Administrativa RJ',
+    tratamentoChefeDa: 'Chefe',
     manager: 'Gestor Administrativo',
     gerente: 'Gestor Administrativo',
     status: 'Ativo',
@@ -147,6 +165,65 @@ export const BASE_SEDES_CANTEIROS: ConstructionSite[] = [
     observacoes: 'Escritório de Representação e Engenharia RJ',
   },
 ];
+
+/**
+ * Helper para resolver dinamicamente os 3 signatários oficiais do canteiro/sede:
+ * - Assinatura 1: Encarregado/Chefe do Canteiro
+ * - Assinatura 2: Chefe/Encarregado da DA
+ * - Assinatura 3: Engenheiro Fiscal / RH Admin
+ */
+export function getSignaturesForCanteiro(
+  siteOrBranch?: string | ConstructionSite,
+  allSites: ConstructionSite[] = BASE_SEDES_CANTEIROS
+): CanteiroSignatures {
+  let site: ConstructionSite | undefined;
+
+  if (typeof siteOrBranch === 'object' && siteOrBranch !== null) {
+    site = siteOrBranch;
+  } else if (typeof siteOrBranch === 'string' && siteOrBranch.trim()) {
+    const term = siteOrBranch.trim().toUpperCase();
+    site = allSites.find(s => 
+      (s.code && s.code.toUpperCase() === term) ||
+      (s.codigo && s.codigo.toUpperCase() === term) ||
+      (s.branch && s.branch.toUpperCase() === term) ||
+      (s.sede && s.sede.toUpperCase() === term) ||
+      (s.name && s.name.toUpperCase().includes(term)) ||
+      (s.nome && s.nome.toUpperCase().includes(term)) ||
+      term.includes(s.code || '') ||
+      term.includes(s.codigo || '')
+    );
+  }
+
+  if (!site) {
+    // Fallback padrão COMARA Coari / Geral
+    site = allSites.find(s => (s.code || s.codigo) === 'KO') || BASE_SEDES_CANTEIROS[0];
+  }
+
+  const tratamentoCanteiro: TratamentoTitulo = site.tratamentoChefeCanteiro || 'Encarregado';
+  const tratamentoDa: TratamentoTitulo = site.tratamentoChefeDa || 'Chefe';
+  const nomeCanteiro = site.chefeCanteiro || site.chief || 'Capitão Encarregado de Obras';
+  const nomeDa = site.chefeDa || 'Chefe da Divisão Administrativa';
+  const nomeGerente = site.gerente || site.manager || 'Engenheiro Fiscal de Obras COMARA';
+  const canteiroDesc = site.nome || site.name || `Canteiro ${site.codigo || site.code || 'COMARA'}`;
+
+  return {
+    assinatura1: {
+      titulo: `${tratamentoCanteiro} do Canteiro`,
+      nome: nomeCanteiro,
+      subtitulo: `${canteiroDesc} - COMARA`,
+    },
+    assinatura2: {
+      titulo: `${tratamentoDa} da Divisão Administrativa (DA)`,
+      nome: nomeDa,
+      subtitulo: 'Divisão de Administração - COMARA',
+    },
+    assinatura3: {
+      titulo: 'Engenheiro Fiscal / RH Admin',
+      nome: nomeGerente,
+      subtitulo: 'Comissão de Aeroportos da Região Amazônica',
+    },
+  };
+}
 
 /**
  * Helper para mesclar canteiros do Firestore com as Sedes/Canteiros base
@@ -266,7 +343,11 @@ export const canteiroService = {
             const rawCode = data.code || data.codigo || 'CT-01';
             const rawBranch = data.branch || data.sede || rawCode;
             const rawChief = data.chief || data.chefeCanteiro || '';
+            const rawTratamentoChefe = data.tratamentoChefeCanteiro || 'Encarregado';
             const rawChiefContact = data.chiefContact || data.chefeContato || data.contato || '';
+            const rawChefeDa = data.chefeDa || '';
+            const rawTratamentoChefeDa = data.tratamentoChefeDa || 'Chefe';
+            const rawAuxDa = data.auxDa || '';
             const rawManager = data.manager || data.gerente || '';
             const rawAddress = data.address || data.endereco || '';
             const rawStatus = data.status || 'Ativo';
@@ -282,8 +363,12 @@ export const canteiroService = {
               sede: rawBranch,
               chief: rawChief,
               chefeCanteiro: rawChief,
+              tratamentoChefeCanteiro: rawTratamentoChefe,
               chiefContact: rawChiefContact,
               chefeContato: rawChiefContact,
+              chefeDa: rawChefeDa,
+              tratamentoChefeDa: rawTratamentoChefeDa,
+              auxDa: rawAuxDa,
               manager: rawManager,
               gerente: rawManager,
               address: rawAddress,
@@ -298,6 +383,8 @@ export const canteiroService = {
               notes: data.notes || data.observacoes || '',
               observacoes: data.notes || data.observacoes || '',
               workerCount: typeof data.workerCount === 'number' ? data.workerCount : 0,
+              responsaveis: data.responsaveis || [],
+              historicoTransicao: data.historicoTransicao || [],
               createdAt: data.createdAt || data.criadoEm,
               updatedAt: data.updatedAt || data.atualizadoEm,
             } as any);
@@ -331,7 +418,11 @@ export const canteiroService = {
     const rawName = site.name || site.nome || `Canteiro ${rawCode}`;
     const rawBranch = (site.branch || site.sede || rawCode).toUpperCase();
     const rawChief = site.chief || site.chefeCanteiro || '';
+    const rawTratamentoChefe = site.tratamentoChefeCanteiro || 'Encarregado';
     const rawChiefContact = site.chiefContact || site.chefeContato || '';
+    const rawChefeDa = site.chefeDa || '';
+    const rawTratamentoChefeDa = site.tratamentoChefeDa || 'Chefe';
+    const rawAuxDa = site.auxDa || '';
     const rawManager = site.manager || site.gerente || '';
     const rawAddress = site.address || site.endereco || '';
     const rawStatus = site.status || 'Ativo';
@@ -352,10 +443,16 @@ export const canteiroService = {
       sede: rawBranch,
       chief: rawChief,
       chefeCanteiro: rawChief,
+      tratamentoChefeCanteiro: rawTratamentoChefe,
       chiefContact: rawChiefContact,
       chefeContato: rawChiefContact,
+      chefeDa: rawChefeDa,
+      tratamentoChefeDa: rawTratamentoChefeDa,
+      auxDa: rawAuxDa,
       manager: rawManager,
       gerente: rawManager,
+      responsaveis: site.responsaveis || [],
+      historicoTransicao: site.historicoTransicao || [],
       status: rawStatus,
       insalubrityLevel: rawInsalubrity,
       grauInsalubridade: rawInsalubrity,

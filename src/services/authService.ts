@@ -676,7 +676,50 @@ export const authService = {
         false,
         `Tentativa de login com e-mail não autorizado: ${cleanEmail}`
       );
-      return { success: false, message: 'Usuário não cadastrado na equipe de RH.' };
+      return { success: false, message: 'Usuário não cadastrado na equipe de gestão/RH.' };
+    }
+
+    // Regra das 48 Horas na Passagem de Bastão:
+    // Verifica se há desativação agendada decorrente de transição de chefia/liderança
+    if (adminDoc.desativacaoAgendada) {
+      const agora = Date.now();
+      const expiracao = new Date(adminDoc.desativacaoAgendada).getTime();
+      if (!isNaN(expiracao) && agora > expiracao) {
+        // Transcorreram as 48 horas: revoga as permissões de acesso administrativo automaticamente
+        adminDoc.ativo = false;
+        adminDoc.transicaoStatus = 'EXPIRADO';
+        
+        try {
+          const nowIso = new Date().toISOString();
+          await Promise.all([
+            setDoc(doc(db, COLLECTIONS.ADMIN_USERS, cleanEmail), {
+              ativo: false,
+              transicaoStatus: 'EXPIRADO',
+              atualizadoEm: nowIso,
+            }, { merge: true }),
+            setDoc(doc(db, 'usuarios_sistema', cleanEmail), {
+              ativo: false,
+              transicaoStatus: 'EXPIRADO',
+              atualizadoEm: nowIso,
+            }, { merge: true })
+          ]);
+        } catch (e) {
+          console.warn('Erro ao persistir revogação pós-48h no Firestore:', e);
+        }
+
+        await this.logAccess(
+          cleanEmail,
+          adminDoc.nome,
+          'TENTATIVA_INVALIDA',
+          false,
+          `Acesso bloqueado: Carência de 48h da transição de liderança expirou para ${cleanEmail}.`
+        );
+
+        return {
+          success: false,
+          message: 'Período de transição de 48 horas concluído. Suas credenciais de liderança/gestão foram revogadas conforme regra institucional.'
+        };
+      }
     }
 
     // Verifica se está ativo
@@ -688,7 +731,7 @@ export const authService = {
         false,
         `Tentativa de login de usuário inativo: ${cleanEmail}`
       );
-      return { success: false, message: 'Este usuário está inativo. Contate o administrador.' };
+      return { success: false, message: 'Este usuário está inativo ou teve seu acesso revogado. Contate o administrador.' };
     }
 
     // Verifica senha
@@ -825,5 +868,91 @@ export const authService = {
       message: 'Conta de gestão cadastrada com sucesso!'
     };
   },
+
+  // -------------------------------------------------------------
+  // REGRA DAS 48 HORAS: PASSAGEM DE BASTÃO DE LIDERANÇA
+  // -------------------------------------------------------------
+  
+  /**
+   * Agenda a desativação do encarregado/chefe anterior para daqui a 48 horas
+   */
+  async scheduleRoleTransitionHandover(
+    previousEmail: string,
+    newResponsibleName: string,
+    roleTitle: string,
+    canteiroCode: string
+  ): Promise<void> {
+    const cleanEmail = previousEmail.trim().toLowerCase();
+    if (!cleanEmail) return;
+
+    const deactivationTime = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
+    const nowIso = new Date().toISOString();
+
+    try {
+      const updateData = {
+        desativacaoAgendada: deactivationTime,
+        transicaoStatus: 'PENDENTE_48H',
+        atualizadoEm: nowIso,
+      };
+
+      await Promise.all([
+        setDoc(doc(db, COLLECTIONS.ADMIN_USERS, cleanEmail), updateData, { merge: true }),
+        setDoc(doc(db, 'usuarios_sistema', cleanEmail), updateData, { merge: true })
+      ]);
+
+      await this.logAccess(
+        cleanEmail,
+        'Transição de Função',
+        'LOGIN_GESTAO_RH',
+        true,
+        `Passagem de bastão em ${canteiroCode} (${roleTitle}). Novo responsável: ${newResponsibleName}. Desativação agendada para 48h (${new Date(deactivationTime).toLocaleString('pt-BR')}).`
+      );
+    } catch (e) {
+      console.warn('Erro ao agendar transição de 48h:', e);
+    }
+  },
+
+  /**
+   * Varredura periódica para revogar permissões administrativas expiradas pós 48h
+   */
+  async checkAndRevokeExpiredTransitions(adminUsers: AdminUser[]): Promise<AdminUser[]> {
+    const now = Date.now();
+    const updatedUsers: AdminUser[] = [];
+
+    for (const user of adminUsers) {
+      if (user.desativacaoAgendada && user.ativo !== false) {
+        const expTime = new Date(user.desativacaoAgendada).getTime();
+        if (!isNaN(expTime) && now > expTime) {
+          const cleanEmail = user.email.trim().toLowerCase();
+          try {
+            const nowIso = new Date().toISOString();
+            await Promise.all([
+              setDoc(doc(db, COLLECTIONS.ADMIN_USERS, cleanEmail), {
+                ativo: false,
+                transicaoStatus: 'EXPIRADO',
+                atualizadoEm: nowIso,
+              }, { merge: true }),
+              setDoc(doc(db, 'usuarios_sistema', cleanEmail), {
+                ativo: false,
+                transicaoStatus: 'EXPIRADO',
+                atualizadoEm: nowIso,
+              }, { merge: true })
+            ]);
+            updatedUsers.push({ ...user, ativo: false, transicaoStatus: 'EXPIRADO' });
+          } catch (err) {
+            console.warn('Erro ao auto-revogar usuário expirado:', err);
+            updatedUsers.push(user);
+          }
+        } else {
+          updatedUsers.push(user);
+        }
+      } else {
+        updatedUsers.push(user);
+      }
+    }
+
+    return updatedUsers;
+  }
 };
+
 

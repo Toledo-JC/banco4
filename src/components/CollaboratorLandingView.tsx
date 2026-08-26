@@ -4,6 +4,8 @@ import { authService } from '../services/authService';
 import { ComaraLogo } from './ComaraLogo';
 import { ForgotPasswordModal } from './ForgotPasswordModal';
 import { ContrachequeMirrorView } from './ContrachequeMirrorView';
+import { SessionTimeoutModal } from './SessionTimeoutModal';
+import { useIdleTimer } from '../hooks/useIdleTimer';
 import { 
   ShieldCheck, 
   Lock, 
@@ -149,13 +151,31 @@ export const CollaboratorLandingView: React.FC<CollaboratorLandingViewProps> = (
   };
 
   // Log Out from Employee Statement
-  const handleEmployeeLogout = () => {
+  const handleEmployeeLogout = (inactivity: boolean = false) => {
     setAuthenticatedEmployee(null);
     setMatriculaInput('');
     setPasswordInput('');
-    setErrorMessage(null);
+    if (inactivity) {
+      setErrorMessage('Sessão finalizada por inatividade. Faça login novamente.');
+    } else {
+      setErrorMessage(null);
+    }
     setSuccessMessage(null);
   };
+
+  // Monitor de Inatividade do Colaborador (15 minutos no Canteiro / Terminal)
+  const {
+    isWarning: isIdleWarning,
+    remainingSeconds: idleRemainingSeconds,
+    profileLabel: idleProfileLabel,
+    resetTimer: resetIdleTimer,
+    forceTimeout: forceIdleTimeout,
+  } = useIdleTimer({
+    enabled: !!authenticatedEmployee,
+    role: 'AUX_DA',
+    warnSeconds: 60,
+    onTimeout: () => handleEmployeeLogout(true),
+  });
 
   // Calculate Balance & Records for Authenticated Employee
   const employeeData = useMemo(() => {
@@ -480,7 +500,7 @@ export const CollaboratorLandingView: React.FC<CollaboratorLandingViewProps> = (
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={handleEmployeeLogout}
+                    onClick={() => handleEmployeeLogout()}
                     className={`flex items-center gap-2 py-2 px-3 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
                       isDark ? 'bg-[#15171C] border-[#222630] text-gray-300 hover:text-white' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
                     }`}
@@ -506,7 +526,7 @@ export const CollaboratorLandingView: React.FC<CollaboratorLandingViewProps> = (
                   </button>
                   <button
                     type="button"
-                    onClick={handleEmployeeLogout}
+                    onClick={() => handleEmployeeLogout()}
                     className="flex items-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold bg-red-600/90 hover:bg-red-600 text-white transition-all cursor-pointer shadow-sm"
                   >
                     <LogOut className="w-3.5 h-3.5" />
@@ -1084,6 +1104,17 @@ export const CollaboratorLandingView: React.FC<CollaboratorLandingViewProps> = (
           setPasswordInput(newPass);
           setSuccessMessage('Senha redefinida com sucesso! Você já pode fazer login.');
         }}
+      />
+
+      {/* Modal de Aviso de Expiração de Sessão por Inatividade (Colaborador) */}
+      <SessionTimeoutModal
+        isOpen={isIdleWarning}
+        remainingSeconds={idleRemainingSeconds}
+        warnSeconds={60}
+        profileLabel={idleProfileLabel}
+        isDark={isDark}
+        onStayLoggedIn={resetIdleTimer}
+        onLogoutNow={forceIdleTimeout}
       />
 
       {/* Footer */}

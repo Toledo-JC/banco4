@@ -1,4 +1,4 @@
-import { Employee, TimeRecord, AdminUser, InsalubrityRecord, SystemConfig, PaystubRecord } from '../types';
+import { Employee, TimeRecord, AdminUser, InsalubrityRecord, SystemConfig, PaystubRecord, DispensaSptfRecord } from '../types';
 import { INITIAL_EMPLOYEES, INITIAL_TIME_RECORDS, INITIAL_ADMINS } from '../constants/defaultData';
 
 const EMPLOYEES_KEY = 'banco_horas_employees_v1';
@@ -9,6 +9,7 @@ const SYSTEM_CONFIG_KEY = 'banco_horas_system_config_v1';
 const CURRENT_USER_EMAIL_KEY = 'banco_horas_current_email_v1';
 const THEME_KEY = 'banco_horas_theme_v1';
 const PAYSTUBS_KEY = 'comara_paystubs_v1';
+const DISPENSAS_KEY = 'comara_dispensas_sptf_v1';
 
 export const storageService = {
   getEmployees(): Employee[] {
@@ -261,11 +262,51 @@ export const storageService = {
     return this.getPaystubs().filter(p => p.matricula.trim().toUpperCase() === clean);
   },
 
+  // Dispensas de SPTF
+  getDispensasSptf(): DispensaSptfRecord[] {
+    try {
+      const stored = localStorage.getItem(DISPENSAS_KEY);
+      if (stored !== null) {
+        return JSON.parse(stored);
+      }
+    } catch (e) {
+      console.error('Erro ao ler dispensas SPTF do localStorage', e);
+    }
+    return [];
+  },
+
+  saveDispensasSptf(dispensas: DispensaSptfRecord[]) {
+    try {
+      localStorage.setItem(DISPENSAS_KEY, JSON.stringify(dispensas));
+    } catch (e) {
+      console.error('Erro ao salvar dispensas SPTF no localStorage', e);
+    }
+  },
+
+  addDispensaSptf(dispensa: DispensaSptfRecord) {
+    const list = this.getDispensasSptf();
+    const idx = list.findIndex(d => d.id === dispensa.id);
+    if (idx >= 0) {
+      list[idx] = dispensa;
+    } else {
+      list.unshift(dispensa);
+    }
+    this.saveDispensasSptf(list);
+    return list;
+  },
+
+  deleteDispensaSptf(id: string) {
+    const list = this.getDispensasSptf().filter(d => d.id !== id);
+    this.saveDispensasSptf(list);
+    return list;
+  },
+
   // Zerar completamente a base para importação limpa
   clearAllData() {
     this.saveEmployees([]);
     this.saveTimeRecords([]);
     this.savePaystubs([]);
+    this.saveDispensasSptf([]);
     return {
       employees: [] as Employee[],
       records: [] as TimeRecord[],

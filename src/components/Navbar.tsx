@@ -42,6 +42,7 @@ interface NavbarProps {
   onSelectTab: (tab: ActiveTab) => void;
   onOpenNewEntry: () => void;
   onOpenQuickBatchModal: () => void;
+  onOpenSptfDispensa?: () => void;
   onResetData: () => void;
   onClearData: () => void;
   onOpenImportRecordsModal: () => void;
@@ -63,6 +64,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSelectTab,
   onOpenNewEntry,
   onOpenQuickBatchModal,
+  onOpenSptfDispensa,
   onResetData,
   onClearData,
   onOpenImportRecordsModal,
@@ -327,11 +329,41 @@ export const Navbar: React.FC<NavbarProps> = ({
                         </p>
                       </div>
                     </button>
+                    {/* 3. Opção: Nova Dispensa de SPTF */}
+                    {onOpenSptfDispensa && (
+                      <button
+                        id="btn-nav-nova-dispensa-sptf"
+                        onClick={() => {
+                          setIsLaunchDropdownOpen(false);
+                          onOpenSptfDispensa();
+                        }}
+                        className={`w-full px-3 py-2 text-xs text-left flex items-start gap-2.5 rounded-xl transition-colors cursor-pointer ${
+                          isDark ? 'hover:bg-[#1F2229] text-[#E0E2E5]' : 'hover:bg-blue-50/70 text-slate-800'
+                        }`}
+                      >
+                        <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/20 mt-0.5">
+                          <FileText className="w-4 h-4" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold flex items-center justify-between">
+                            <span>Nova Dispensa de SPTF</span>
+                            <span className={`text-[9px] px-1.5 py-0.2 rounded font-semibold ${
+                              isDark ? 'bg-emerald-500/20 text-emerald-300' : 'bg-emerald-100 text-emerald-700'
+                            }`}>
+                              2 Vias A4
+                            </span>
+                          </div>
+                          <p className={`text-[11px] mt-0.5 leading-tight ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+                            Emissão de guia com débito automático no banco
+                          </p>
+                        </div>
+                      </button>
+                    )}
                   </div>
 
                   <div className={`my-1 border-t ${isDark ? 'border-[#1F2229]' : 'border-slate-100'}`} />
 
-                  {/* 3. Opção: Lançamento de Insalubridade */}
+                  {/* 4. Opção: Lançamento de Insalubridade */}
                   <div className="p-1">
                     <button
                       onClick={() => {

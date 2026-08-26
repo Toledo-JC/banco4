@@ -11,6 +11,7 @@ export type OccurrenceType =
   | 'FALTA_JUSTIFICADA'         // Atestado, Licença Gala/Luto, Ordem Judicial (Neutro: 0h Banco, 0h Folha)
   | 'DISPENSA_OPERACIONAL'      // Dispensa / Saída Antecipada / Horas Negativas Operacionais (Débito no Banco)
   | 'COMPENSACAO'               // Folga Compensatória / Débito em Banco (Débito no Banco)
+  | 'COMPENSACAO_DISPENSA'      // Dispensa de SPTF com Emissão de Guia 2 Vias (Débito no Banco)
   | 'ATESTADO_MEDICO'           // 'AT' (Falta Justificada Médica - Neutro: 0h Banco, 0h Folha)
   | 'FERIAS'                    // 'FE' (Descanso Anual - Neutro: 0h Banco, 0h Folha)
   | 'LICENCA';                  // 'LIC' (Licença Legal/Gala/Luto - Neutro: 0h Banco, 0h Folha)
@@ -27,7 +28,71 @@ export interface LiquidationLink {
   observacao?: string;
 }
 
-export type AdminRole = 'SUPER_ADMIN' | 'GESTOR_RH' | 'AUX_DA' | 'AUDITOR' | 'CHEFE_CANTEIRO' | 'ROLE_GERENTE' | 'GERENTE_CAMPO';
+export type AdminRole = 
+  | 'SUPER_ADMIN' 
+  | 'GESTOR_RH' 
+  | 'AUX_DA' 
+  | 'AUDITOR' 
+  | 'CHEFE_CANTEIRO' 
+  | 'ENCARREGADO_CANTEIRO' 
+  | 'CHEFE_DA' 
+  | 'ENCARREGADO_DA' 
+  | 'GERENTE' 
+  | 'ROLE_GERENTE' 
+  | 'GERENTE_CAMPO';
+
+export type CanteiroRole = 
+  | 'GERENTE' 
+  | 'CHEFE_CANTEIRO' 
+  | 'ENCARREGADO_CANTEIRO' 
+  | 'CHEFE_DA' 
+  | 'ENCARREGADO_DA' 
+  | 'AUX_DA';
+
+export type TratamentoTitulo = 'Chefe' | 'Encarregado';
+
+export interface CanteiroResponsavel {
+  id?: string;
+  papel: CanteiroRole;
+  tratamento: TratamentoTitulo;
+  nome: string;
+  email?: string;
+  contato?: string;
+  ativo: boolean;
+  designadoEm: string;
+  desativacaoAgendada?: string; // Carência 48h para revogação automática
+}
+
+export interface CanteiroTransicao {
+  id: string;
+  papel: CanteiroRole;
+  tratamento: TratamentoTitulo;
+  responsavelAnterior: string;
+  responsavelAnteriorEmail?: string;
+  novoResponsavel: string;
+  novoResponsavelEmail?: string;
+  dataTransicao: string; // ISO
+  agendadoParaDesativacao: string; // ISO (+48h)
+  status: 'EM_ANDAMENTO' | 'CONCLUIDO';
+}
+
+export interface CanteiroSignatures {
+  assinatura1: {
+    titulo: string; // Ex: "Chefe do Canteiro" ou "Encarregado do Canteiro"
+    nome: string;
+    subtitulo: string;
+  };
+  assinatura2: {
+    titulo: string; // Ex: "Chefe da Divisão Administrativa" ou "Encarregado da DA"
+    nome: string;
+    subtitulo: string;
+  };
+  assinatura3: {
+    titulo: string; // Ex: "Engenheiro Fiscal / Gestor de RH"
+    nome: string;
+    subtitulo: string;
+  };
+}
 
 export type AccessLogType = 
   | 'LOGIN_COLABORADOR' 
@@ -72,6 +137,10 @@ export interface AdminUser {
   ativo: boolean;
   passwordHash?: string;
   senha?: string;
+  desativacaoAgendada?: string; // Data ISO (+48h) de revogação automática após passagem de bastão
+  transicaoStatus?: 'PENDENTE_48H' | 'EXPIRADO' | 'ATIVO';
+  canteiroCodigo?: string;
+  tratamentoTitulo?: TratamentoTitulo;
   criadoEm: string;
   atualizadoEm?: string;
 }
@@ -225,9 +294,15 @@ export interface ConstructionSite {
   endereco?: string;
   sede?: Branch;
   chefeCanteiro?: string; // Encarregado / Chefe de Canteiro
+  tratamentoChefeCanteiro?: TratamentoTitulo; // [ Chefe | Encarregado ]
   chefeContato?: string; // Telefone / Contato do Chefe de Canteiro
   chiefContact?: string;
-  gerente?: string; // Fiscal / Gerente
+  chefeDa?: string; // Chefe / Encarregado da Divisão de Administração (DA)
+  tratamentoChefeDa?: TratamentoTitulo; // [ Chefe | Encarregado ]
+  gerente?: string; // Fiscal / Engenheiro Fiscal / Gerente
+  auxDa?: string; // Auxiliar da DA
+  responsaveis?: CanteiroResponsavel[];
+  historicoTransicao?: CanteiroTransicao[];
   status: 'Ativo' | 'Em Desmobilização' | 'Encerrado' | 'ACTIVE' | 'INACTIVE' | 'PLANNED';
   grauInsalubridade?: GrauInsalubridade;
   insalubrityLevel?: GrauInsalubridade;
@@ -296,5 +371,62 @@ export interface PaystubRecord {
   importadoEm: string;
   importadoPorEmail?: string;
   observacoes?: string;
+}
+
+export interface DispensaSptfRecord {
+  id: string; // Document ID: `dispensa_${Date.now()}_${matricula}`
+  numeroGuia?: string; // Ex: "SPTF-2026/001"
+  matricula: string;
+  nome: string;
+  saram?: string;
+  secaoCanteiro: string; // Ex: "DECO-KO", "CANTEIRO COARI"
+  data: string; // YYYY-MM-DD
+  horarioInicio: string; // HH:mm (Ex: "13:00")
+  horarioFim: string; // HH:mm (Ex: "16:00")
+  totalHoras: number; // Ex: 3.0
+  motivo: string; // Padrão "COMPENSAÇÃO BANCO DE HORAS"
+  observacoes?: string;
+  emitidoPorNome?: string;
+  emitidoPorEmail?: string;
+  emitidoEm: string; // ISO String
+  lancamentoId?: string; // ID do lançamento no Banco de Horas
+  status?: 'EMITIDA' | 'CANCELADA';
+}
+
+export type AuditActionType =
+  | 'CRIACAO_LANCAMENTO'
+  | 'EDICAO_LANCAMENTO'
+  | 'EXCLUSAO_LANCAMENTO'
+  | 'IMPORTACAO_LANCAMENTOS_LOTE'
+  | 'DESIGNACAO_CHEFE_CANTEIRO'
+  | 'TRANSICAO_RESPONSAVEL_CANTEIRO'
+  | 'ALTERACAO_CANTEIRO'
+  | 'EXCLUSAO_CANTEIRO'
+  | 'EMISSAO_DISPENSA_SPTF'
+  | 'CANCELAMENTO_DISPENSA_SPTF'
+  | 'LANCAMENTO_INSALUBRIDADE'
+  | 'ALTERACAO_GRAU_INSALUBRIDADE'
+  | 'EXCLUSAO_INSALUBRIDADE'
+  | 'IMPORTACAO_INSALUBRIDADE_LOTE'
+  | 'IMPORTACAO_CONTRACHEQUES_LOTE'
+  | 'EXCLUSAO_CONTRACHEQUE'
+  | 'ALTERACAO_CONFIG_SISTEMA'
+  | 'ALTERACAO_PERMISSAO_ADMIN'
+  | 'LIMPEZA_BASE_DADOS'
+  | 'RESTAURACAO_MOCK_DADOS';
+
+export interface AuditLog {
+  id: string; // Document ID: `audit_${Date.now()}_${random}`
+  usuarioId: string; // ID/Email do usuário que executou a ação
+  nomeUsuario: string; // Nome do usuário
+  acao: AuditActionType | string;
+  detalhes: string; // Descrição textual detalhada da alteração
+  detalhesJson?: Record<string, any>; // Metadados adicionais em JSON
+  canteiroId: string; // Sede ou canteiro afetado (ex: 'KO', 'KO-DL', 'BE', 'MN', 'TODOS')
+  timestamp: string; // Data ISO String
+  ipOrigem?: string;
+  recursoId?: string;
+  dadosAnteriores?: Record<string, any>;
+  dadosNovos?: Record<string, any>;
 }
 

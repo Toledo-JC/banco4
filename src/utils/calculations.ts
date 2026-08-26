@@ -139,8 +139,9 @@ export function calculateSPTFBalance(
       break;
     }
 
-    // REGRA 2: DISPENSA / SAÍDA ANTECIPADA / HORAS NEGATIVAS OPERACIONAIS
-    // Envia para o Banco de Horas -> Debita do saldo acumulado do colaborador (ex: -8h no banco)
+    // REGRA 2: DISPENSA / SAÍDA ANTECIPADA / COMPENSAÇÃO DE BANCO DE HORAS
+    // Envia para o Banco de Horas -> Debita do saldo acumulado do colaborador (ex: -8h ou horas abatidas)
+    case 'COMPENSACAO_DISPENSA':
     case 'COMPENSACAO':
     case 'DISPENSA_OPERACIONAL': {
       multiplicador = 1.0;
@@ -148,8 +149,10 @@ export function calculateSPTFBalance(
       saldoCalculado = -horasDebito;
       horasDescontoFolha = 0.0;
       destinoLancamento = 'BANCO_HORAS';
-      descricaoRegra = `Dispensa / Saída Antecipada / Débito em Banco ('COMP'): Debita -${horasDebito.toFixed(1)}h do Banco de Horas acumulado.`;
-      requerObservacao = true;
+      descricaoRegra = tipo === 'COMPENSACAO_DISPENSA'
+        ? `Dispensa de SPTF / Compensação: Débito de -${horasDebito.toFixed(1)}h no Banco de Horas com emissão de guia em 2 vias.`
+        : `Dispensa / Saída Antecipada / Débito em Banco ('COMP'): Debita -${horasDebito.toFixed(1)}h do Banco de Horas acumulado.`;
+      requerObservacao = tipo !== 'COMPENSACAO_DISPENSA';
       break;
     }
 

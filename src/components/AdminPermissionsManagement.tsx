@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AdminUser } from '../types';
+import { AdminUser, AdminRole } from '../types';
 import { storageService } from '../services/storageService';
 import { firestoreService } from '../services/firestoreService';
 import { hashPassword } from '../services/authService';
@@ -48,7 +48,7 @@ export const AdminPermissionsManagement: React.FC<AdminPermissionsManagementProp
   const [email, setEmail] = useState('');
   const [nome, setNome] = useState('');
   const [cargo, setCargo] = useState('Analista de RH');
-  const [nivelAcesso, setNivelAcesso] = useState<'SUPER_ADMIN' | 'GESTOR_RH' | 'AUX_DA' | 'AUDITOR' | 'CHEFE_CANTEIRO' | 'GERENTE_CAMPO' | 'ROLE_GERENTE'>('AUX_DA');
+  const [nivelAcesso, setNivelAcesso] = useState<AdminRole>('AUX_DA');
   const [senhaInicial, setSenhaInicial] = useState('');
   const [confirmarSenha, setConfirmarSenha] = useState('');
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);

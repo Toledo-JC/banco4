@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Employee, TimeRecord, Attachment, AdminUser, AdminRole, AuthSession, InsalubrityRecord, SystemConfig, GrauInsalubridade, ConstructionSite, PaystubRecord } from './types';
+import { Employee, TimeRecord, Attachment, AdminUser, AdminRole, AuthSession, InsalubrityRecord, SystemConfig, GrauInsalubridade, ConstructionSite, PaystubRecord, DispensaSptfRecord } from './types';
 import { storageService } from './services/storageService';
 import { firestoreService, BatchProgressInfo } from './services/firestoreService';
 import { auth, googleProvider, testFirestoreConnection, isPermissionError } from './services/firebase';
@@ -23,6 +23,7 @@ import { CollaboratorLandingView } from './components/CollaboratorLandingView';
 import { AdminLoginModal } from './components/AdminLoginModal';
 import { DailyEntryModal } from './components/DailyEntryModal';
 import { QuickBatchEntryModal } from './components/QuickBatchEntryModal';
+import { SptfDispensaModal } from './components/SptfDispensaModal';
 import { SiteSupervisorMobileView } from './components/SiteSupervisorMobileView';
 import { CertificatePreviewModal } from './components/CertificatePreviewModal';
 import { ImportTimeRecordsModal } from './components/ImportTimeRecordsModal';
@@ -32,6 +33,8 @@ import { ExecutiveReportsView } from './components/ExecutiveReportsView';
 import { ContrachequesManagement } from './components/ContrachequesManagement';
 import { ComaraLogoModal } from './components/ComaraLogoModal';
 import { DatabaseSafetyActionModal, SafetyActionType } from './components/DatabaseSafetyActionModal';
+import { SessionTimeoutModal } from './components/SessionTimeoutModal';
+import { useIdleTimer } from './hooks/useIdleTimer';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { CheckCircle2, AlertCircle, Cloud, RefreshCw, X, Database } from 'lucide-react';
 
@@ -49,6 +52,7 @@ export default function App() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [records, setRecords] = useState<TimeRecord[]>([]);
   const [insalubrityRecords, setInsalubrityRecords] = useState<InsalubrityRecord[]>([]);
+  const [dispensasSptf, setDispensasSptf] = useState<DispensaSptfRecord[]>([]);
   const [constructionSites, setConstructionSites] = useState<ConstructionSite[]>([]);
   const [paystubs, setPaystubs] = useState<PaystubRecord[]>([]);
   const [systemConfig, setSystemConfig] = useState<SystemConfig>(() => storageService.getSystemConfig());
@@ -85,6 +89,10 @@ export default function App() {
   const [isImportRecordsModalOpen, setIsImportRecordsModalOpen] = useState(false);
   const [dailyEntryPreselectedMatricula, setDailyEntryPreselectedMatricula] = useState<string | undefined>();
   const [dailyEntryPreselectedDate, setDailyEntryPreselectedDate] = useState<string | undefined>();
+  
+  // Dispensa de SPTF Modal State
+  const [isSptfDispensaModalOpen, setIsSptfDispensaModalOpen] = useState(false);
+  const [sptfDispensaPreselectedMatricula, setSptfDispensaPreselectedMatricula] = useState<string | undefined>();
   
   // Certificate Preview Modal
   const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null);
@@ -221,6 +229,21 @@ export default function App() {
       }
     );
 
+    // Subscribe to Dispensas de SPTF in Firestore
+    const unsubDispensas = firestoreService.subscribeDispensasSptf(
+      (items) => {
+        setDispensasSptf(items);
+        if (items.length > 0) {
+          storageService.saveDispensasSptf(items);
+        }
+      },
+      (err) => {
+        console.warn('Fallback local para dispensas SPTF:', err);
+        const local = storageService.getDispensasSptf();
+        setDispensasSptf(local);
+      }
+    );
+
     return () => {
       try {
         if (typeof unsubEmployees === 'function') unsubEmployees();
@@ -256,6 +279,11 @@ export default function App() {
         if (typeof unsubPaystubs === 'function') unsubPaystubs();
       } catch (e) {
         console.warn('Erro ao cancelar listener de contracheques:', e);
+      }
+      try {
+        if (typeof unsubDispensas === 'function') unsubDispensas();
+      } catch (e) {
+        console.warn('Erro ao cancelar listener de dispensas SPTF:', e);
       }
     };
   }, [selectedMatricula]);
@@ -409,6 +437,47 @@ export default function App() {
       showToast('Sessão encerrada com sucesso.', 'info');
     }
   };
+
+  // Logoff Seguro por Inatividade do Usuário (Auto-Logoff com redirecionamento e notificação)
+  const handleInactivityTimeout = useCallback(async () => {
+    try {
+      await firebaseSignOut(auth);
+    } catch (err) {
+      console.error('Erro ao desconectar do Firebase na inatividade:', err);
+    } finally {
+      authService.clearSession();
+      setCurrentUser(null);
+      setUserRole('GESTOR_RH');
+      setUserMode('ADMIN');
+      setActiveTab('extrato');
+      setIsAdminLoginModalOpen(false);
+      setIsDailyEntryModalOpen(false);
+      setIsQuickBatchModalOpen(false);
+      setIsImportRecordsModalOpen(false);
+      setPreviewAttachment(null);
+      setBatchProgress(null);
+
+      // Notificação discreta solicitada
+      showToast('Sessão finalizada por inatividade. Faça login novamente.', 'info');
+    }
+  }, [showToast]);
+
+  // Monitor de Inatividade do Usuário Adaptativo (useIdleTimer)
+  // Perfil AUX_DA (Canteiro): 15 minutos sem interação
+  // Perfil RH_ADMIN / Administrador: 30 minutos sem interação
+  // Faltando 60 segundos: Dispara aviso prévio com contagem regressiva
+  const {
+    isWarning: isIdleWarning,
+    remainingSeconds: idleRemainingSeconds,
+    profileLabel: idleProfileLabel,
+    resetTimer: resetIdleTimer,
+    forceTimeout: forceIdleTimeout,
+  } = useIdleTimer({
+    enabled: !!currentUser,
+    role: userRole,
+    warnSeconds: 60,
+    onTimeout: handleInactivityTimeout,
+  });
 
   // Firestore Write: Salvar Lançamento Individual
   const handleSaveRecord = async (newRecord: TimeRecord) => {
@@ -670,6 +739,61 @@ export default function App() {
       storageService.deleteTimeRecord(id);
       setRecords(prev => prev.filter(r => r.id !== id));
       showToast('Lançamento removido do cache local.', 'info');
+    }
+  };
+
+  // Handlers para Guia de Dispensa de SPTF (Compensação em Banco de Horas)
+  const handleOpenSptfDispensa = (matricula?: string) => {
+    if (userRole === 'AUDITOR' || userMode === 'COLABORADOR') {
+      showToast('Ação bloqueada: Seu nível de acesso não permite emissão de dispensas de SPTF.', 'error');
+      return;
+    }
+    setSptfDispensaPreselectedMatricula(matricula);
+    setIsSptfDispensaModalOpen(true);
+  };
+
+  const handleSaveDispensaSptf = async (dispensa: DispensaSptfRecord, lancamentoRecord: TimeRecord) => {
+    try {
+      await firestoreService.emitDispensaSptf(dispensa, lancamentoRecord);
+      storageService.addDispensaSptf(dispensa);
+      storageService.addTimeRecord(lancamentoRecord);
+      showToast(`Guia de Dispensa de SPTF #${dispensa.numeroGuia} emitida e debitada no Banco de Horas com sucesso!`, 'success');
+    } catch (error: any) {
+      console.error('Erro ao emitir Dispensa de SPTF no Firestore:', error);
+      if (isPermissionError(error)) {
+        setFirestoreErrorNotice('Erro de permissão no banco de dados. Verifique a autenticação.');
+      }
+      storageService.addDispensaSptf(dispensa);
+      const updatedRecords = storageService.addTimeRecord(lancamentoRecord);
+      setRecords([...updatedRecords]);
+      setDispensasSptf(prev => [dispensa, ...prev]);
+      showToast(`Guia de Dispensa #${dispensa.numeroGuia} emitida e salva localmente.`, 'info');
+    }
+  };
+
+  const handleDeleteDispensaSptf = async (dispensaId: string, lancamentoId?: string) => {
+    if (userRole === 'AUDITOR' || userMode === 'COLABORADOR') {
+      showToast('Ação bloqueada: Seu nível de acesso não permite exclusão de dispensas.', 'error');
+      return;
+    }
+    try {
+      await firestoreService.deleteDispensaSptf(dispensaId, lancamentoId);
+      storageService.deleteDispensaSptf(dispensaId);
+      if (lancamentoId) {
+        storageService.deleteTimeRecord(lancamentoId);
+        setRecords(prev => prev.filter(r => r.id !== lancamentoId));
+      }
+      setDispensasSptf(prev => prev.filter(d => d.id !== dispensaId));
+      showToast('Guia de Dispensa de SPTF cancelada com sucesso!', 'success');
+    } catch (err: any) {
+      console.error('Erro ao excluir dispensa SPTF:', err);
+      storageService.deleteDispensaSptf(dispensaId);
+      if (lancamentoId) {
+        storageService.deleteTimeRecord(lancamentoId);
+        setRecords(prev => prev.filter(r => r.id !== lancamentoId));
+      }
+      setDispensasSptf(prev => prev.filter(d => d.id !== dispensaId));
+      showToast('Guia de Dispensa removida localmente.', 'info');
     }
   };
 
@@ -938,9 +1062,14 @@ export default function App() {
   }
 
   // -------------------------------------------------------------
-  // RENDER: VISÃO EXCLUSIVA MOBILE CHEFE DE CANTEIRO (RBAC)
+  // RENDER: VISÃO EXCLUSIVA MOBILE CHEFE / ENCARREGADO / AUX DA (RBAC)
   // -------------------------------------------------------------
-  if (userRole === 'CHEFE_CANTEIRO') {
+  if (
+    userRole === 'CHEFE_CANTEIRO' || 
+    userRole === 'ENCARREGADO_CANTEIRO' || 
+    userRole === 'AUX_DA' || 
+    userRole === 'ENCARREGADO_DA'
+  ) {
     return (
       <div translate="no" className="notranslate min-h-screen flex flex-col">
         {toastMessage && (
@@ -955,7 +1084,7 @@ export default function App() {
             <span>{toastMessage.text}</span>
           </div>
         )}
-        <ErrorBoundary fallbackTitle="Portal de Campo - Chefe de Canteiro">
+        <ErrorBoundary fallbackTitle="Portal de Campo - Canteiro / Divisão Administrativa">
           <SiteSupervisorMobileView
             employees={employees}
             records={records}
@@ -963,8 +1092,38 @@ export default function App() {
             onToggleTheme={handleToggleTheme}
             onLogout={handleSignOut}
             currentUser={currentUser}
+            onOpenSptfDispensa={handleOpenSptfDispensa}
           />
         </ErrorBoundary>
+
+        {/* Modal: Emissão de Dispensa de SPTF no Canteiro (Guia A4 2 Vias) */}
+        <SptfDispensaModal
+          isOpen={isSptfDispensaModalOpen}
+          onClose={() => {
+            setIsSptfDispensaModalOpen(false);
+            setSptfDispensaPreselectedMatricula(undefined);
+          }}
+          employees={employees}
+          records={records}
+          constructionSites={constructionSites}
+          preselectedMatricula={sptfDispensaPreselectedMatricula}
+          onSaveDispensa={handleSaveDispensaSptf}
+          systemConfig={systemConfig}
+          currentUserEmail={currentUserEmail}
+          currentUserName={(currentUser as any)?.nome || (currentUser as any)?.displayName || 'Gestor SPTF'}
+          theme={theme}
+        />
+
+        {/* Modal de Aviso de Expiração de Sessão por Inatividade */}
+        <SessionTimeoutModal
+          isOpen={isIdleWarning}
+          remainingSeconds={idleRemainingSeconds}
+          warnSeconds={60}
+          profileLabel={idleProfileLabel}
+          isDark={isDark}
+          onStayLoggedIn={resetIdleTimer}
+          onLogoutNow={forceIdleTimeout}
+        />
       </div>
     );
   }
@@ -1061,6 +1220,7 @@ export default function App() {
         onSelectTab={setActiveTab}
         onOpenNewEntry={() => handleOpenNewEntry()}
         onOpenQuickBatchModal={handleOpenQuickBatchModal}
+        onOpenSptfDispensa={handleOpenSptfDispensa}
         onResetData={handleTriggerLoadMocksSafety}
         onClearData={handleTriggerClearDataSafety}
         onOpenImportRecordsModal={() => setIsImportRecordsModalOpen(true)}
@@ -1090,6 +1250,7 @@ export default function App() {
               onViewAttachment={handleViewAttachment}
               onOpenImportRecordsModal={() => setIsImportRecordsModalOpen(true)}
               onOpenQuickBatchModal={() => setIsQuickBatchModalOpen(true)}
+              onOpenSptfDispensa={handleOpenSptfDispensa}
               onNavigateToEmployees={() => setActiveTab('colaboradores')}
               onResetData={handleTriggerLoadMocksSafety}
               onClearData={handleTriggerClearDataSafety}
@@ -1144,11 +1305,13 @@ export default function App() {
               employees={employees}
               records={records}
               insalubrityRecords={insalubrityRecords}
+              constructionSites={constructionSites}
               systemConfig={systemConfig}
               currentUserEmail={currentUserEmail}
               userRole={userRole}
               onSaveInsalubrityBatch={handleSaveInsalubrityBatch}
               onNavigateToInsalubrity={() => setActiveTab('insalubridade')}
+              onOpenSptfDispensa={handleOpenSptfDispensa}
               theme={theme}
             />
           )}
@@ -1162,6 +1325,7 @@ export default function App() {
               onSelectMatricula={setSelectedMatricula}
               onBack={() => setActiveTab('dashboard')}
               onOpenNewEntry={(mat) => handleOpenNewEntry(mat)}
+              onOpenSptfDispensa={handleOpenSptfDispensa}
               onOpenEditEntry={handleOpenEditEntry}
               onDeleteRecord={handleDeleteRecord}
               onViewAttachment={handleViewAttachment}
@@ -1250,7 +1414,25 @@ export default function App() {
         theme={theme}
       />
 
-      {/* 3. Modal: Importar Lançamentos Diários CSV */}
+      {/* 3. Modal: Emissão de Dispensa de SPTF (Compensação com Guia A4 2 Vias) */}
+      <SptfDispensaModal
+        isOpen={isSptfDispensaModalOpen}
+        onClose={() => {
+          setIsSptfDispensaModalOpen(false);
+          setSptfDispensaPreselectedMatricula(undefined);
+        }}
+        employees={employees}
+        records={records}
+        constructionSites={constructionSites}
+        preselectedMatricula={sptfDispensaPreselectedMatricula}
+        onSaveDispensa={handleSaveDispensaSptf}
+        systemConfig={systemConfig}
+        currentUserEmail={currentUserEmail}
+        currentUserName={(currentUser as any)?.nome || (currentUser as any)?.displayName || 'Gestor SPTF'}
+        theme={theme}
+      />
+
+      {/* 4. Modal: Importar Lançamentos Diários CSV */}
       <ImportTimeRecordsModal
         isOpen={isImportRecordsModalOpen}
         onClose={() => setIsImportRecordsModalOpen(false)}
@@ -1259,7 +1441,7 @@ export default function App() {
         theme={theme}
       />
 
-      {/* 4. Modal: Pré-visualização de Atestados / Certificados */}
+      {/* 5. Modal: Pré-visualização de Atestados / Certificados */}
       <CertificatePreviewModal
         isOpen={previewAttachment !== null}
         onClose={() => setPreviewAttachment(null)}
@@ -1269,7 +1451,7 @@ export default function App() {
         theme={theme}
       />
 
-      {/* 5. Modal: Configuração de Logo e Identidade Visual COMARA */}
+      {/* 6. Modal: Configuração de Logo e Identidade Visual COMARA */}
       <ComaraLogoModal
         isOpen={isLogoModalOpen}
         onClose={() => setIsLogoModalOpen(false)}
@@ -1278,7 +1460,7 @@ export default function App() {
         theme={theme}
       />
 
-      {/* 6. Modal: Confirmação e Segurança de Banco de Dados com Ponto de Restauração */}
+      {/* 7. Modal: Confirmação e Segurança de Banco de Dados com Ponto de Restauração */}
       <DatabaseSafetyActionModal
         isOpen={isSafetyModalOpen}
         onClose={() => setIsSafetyModalOpen(false)}
@@ -1292,6 +1474,17 @@ export default function App() {
         onConfirmLoadMocks={handleExecuteLoadMocks}
         onRestoreSnapshot={handleRestoreSnapshot}
         theme={theme}
+      />
+
+      {/* 8. Modal de Aviso de Expiração de Sessão por Inatividade (Auto-Logoff) */}
+      <SessionTimeoutModal
+        isOpen={isIdleWarning}
+        remainingSeconds={idleRemainingSeconds}
+        warnSeconds={60}
+        profileLabel={idleProfileLabel}
+        isDark={isDark}
+        onStayLoggedIn={resetIdleTimer}
+        onLogoutNow={forceIdleTimeout}
       />
     </div>
   );
