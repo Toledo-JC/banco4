@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Employee, TimeRecord, Attachment } from '../types';
 import { getEmployeeTotalBalance, formatHoursDecimal, formatHoursToDays } from '../utils/calculations';
+import { ComaraLogo } from './ComaraLogo';
 import { 
   Users, 
   Search, 
@@ -122,20 +123,23 @@ export const FieldManagerView: React.FC<FieldManagerViewProps> = ({
         isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200 shadow-xs'
       }`}>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <h1 className={`text-xl sm:text-2xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                Painel do Gerente de Campo
-              </h1>
-              <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase border ${
-                isDark ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' : 'bg-amber-50 text-amber-800 border-amber-200'
-              }`}>
-                Somente Leitura
-              </span>
+          <div className="flex items-center gap-3.5">
+            <ComaraLogo size="lg" />
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <h1 className={`text-xl sm:text-2xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                  Painel do Gerente de Campo
+                </h1>
+                <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase border ${
+                  isDark ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' : 'bg-amber-50 text-amber-800 border-amber-200'
+                }`}>
+                  COMARA • Leitura
+                </span>
+              </div>
+              <p className={`text-xs ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+                Visualização rápida de saldos da equipe em tempo real para tomada de decisões operacionais no canteiro.
+              </p>
             </div>
-            <p className={`text-xs ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
-              Visualização rápida de saldos da equipe em tempo real para tomada de decisões operacionais no canteiro.
-            </p>
           </div>
 
           <div className={`px-3.5 py-2 rounded-xl border flex items-center gap-3 self-start sm:self-auto ${
@@ -145,11 +149,20 @@ export const FieldManagerView: React.FC<FieldManagerViewProps> = ({
               <span className={`text-[10px] uppercase font-bold block ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
                 Saldo Geral Equipe
               </span>
-              <span className={`text-base font-extrabold font-mono ${
-                stats.saldoTotalGeral >= 0 ? 'text-emerald-500' : 'text-red-500'
-              }`}>
-                {stats.saldoTotalGeral > 0 ? `+${stats.saldoTotalGeral.toFixed(1)}` : stats.saldoTotalGeral.toFixed(1)}h
-              </span>
+              <div className="flex items-baseline justify-end gap-1.5">
+                <span className={`text-base font-extrabold font-mono ${
+                  stats.saldoTotalGeral >= 0 ? 'text-emerald-500' : 'text-red-500'
+                }`}>
+                  {stats.saldoTotalGeral > 0 ? `+${stats.saldoTotalGeral.toFixed(1)}` : stats.saldoTotalGeral.toFixed(1)}h
+                </span>
+                <span className={`text-xs font-bold font-mono px-1.5 py-0.2 rounded ${
+                  stats.saldoTotalGeral >= 0 
+                    ? isDark ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-100 text-emerald-800' 
+                    : isDark ? 'bg-red-500/15 text-red-300' : 'bg-red-100 text-red-800'
+                }`}>
+                  ({(stats.saldoTotalGeral / 8).toFixed(1)} dias)
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -369,9 +382,9 @@ export const FieldManagerView: React.FC<FieldManagerViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Lado Direito: BADGE COLORIDO GIGANTE COM SALDO */}
+                  {/* Lado Direito: BADGE COLORIDO COM SALDO EM HORAS E DIAS */}
                   <div className="flex items-center gap-2.5 shrink-0">
-                    <div className={`px-3.5 py-2 rounded-xl text-center font-mono font-extrabold border transition-all ${
+                    <div className={`px-3.5 py-1.5 rounded-xl text-center font-mono font-extrabold border transition-all ${
                       emp.isPositivo
                         ? isDark 
                           ? 'bg-emerald-950/70 text-emerald-400 border-emerald-500/50 shadow-xs' 
@@ -386,6 +399,15 @@ export const FieldManagerView: React.FC<FieldManagerViewProps> = ({
                     }`}>
                       <div className="text-base sm:text-lg tracking-tight leading-none">
                         {saldoHoras > 0 ? `+${saldoHoras.toFixed(1)}` : saldoHoras.toFixed(1)}h
+                      </div>
+                      <div className={`text-[11px] font-sans font-bold mt-0.5 pt-0.5 border-t ${
+                        emp.isPositivo
+                          ? isDark ? 'border-emerald-800/60 text-emerald-300' : 'border-emerald-400/80 text-emerald-50'
+                          : emp.isNegativo
+                          ? isDark ? 'border-red-800/60 text-red-300' : 'border-red-400/80 text-red-50'
+                          : isDark ? 'border-blue-800/60 text-blue-200' : 'border-slate-300 text-slate-600'
+                      }`}>
+                        {Number(saldoDias) > 0 ? `+${saldoDias}` : saldoDias} dias
                       </div>
                       <div className="text-[9px] font-sans font-medium uppercase mt-0.5 opacity-90">
                         {emp.isPositivo ? 'Crédito' : emp.isNegativo ? 'Débito' : 'Zerado'}

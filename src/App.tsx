@@ -1183,6 +1183,7 @@ export default function App() {
               employees={employees}
               paystubs={paystubs}
               onSaveBatchPaystubs={handleSaveBatchPaystubs}
+              onSaveEmployees={handleUpdateEmployees}
               onDeletePaystub={handleDeletePaystub}
               currentUserEmail={currentUserEmail}
               userRole={userRole}

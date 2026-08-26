@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Employee, TimeRecord, Attachment, CompensationStatus, InsalubrityRecord } from '../types';
+import { ComaraLogo } from './ComaraLogo';
 import { 
   getEmployeeTotalBalance, 
   formatHoursDecimal, 
@@ -243,6 +244,30 @@ export const EmployeeStatement: React.FC<EmployeeStatementProps> = ({
             <PlusCircle className="w-3.5 h-3.5" />
             <span>Lançar Ocorrência</span>
           </button>
+        </div>
+      </div>
+
+      {/* Cabeçalho Institucional Oficial COMARA (Visível na Tela e na Impressão/PDF) */}
+      <div className={`p-4 sm:p-5 rounded-2xl border shadow-xs flex items-center justify-between gap-4 transition-all print:border-b-2 print:border-slate-300 print:shadow-none print:rounded-none print:p-2 ${
+        isDark ? 'bg-[#15171C] border-[#1F2229]' : 'bg-white border-slate-200'
+      }`}>
+        <div className="flex items-center gap-4">
+          <ComaraLogo size="lg" />
+          <div>
+            <div className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-widest text-blue-500 print:text-blue-900">
+              COMANDO DA AERONÁUTICA • COMISSÃO DE AEROPORTOS DA REGIÃO AMAZÔNICA
+            </div>
+            <h2 className={`text-sm sm:text-base font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'} print:text-black`}>
+              EXTRATO INDIVIDUAL DE BANCO DE HORAS & COMPENSAÇÕES (SPTF)
+            </h2>
+            <p className={`text-xs ${isDark ? 'text-[#8E9299]' : 'text-slate-500'} print:text-slate-600`}>
+              Sede/Canteiro: <span className="font-bold text-blue-400 print:text-black">{currentEmployee.sede}</span> • Gerado em: {new Date().toLocaleDateString('pt-BR')} às {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+            </p>
+          </div>
+        </div>
+        <div className="hidden sm:block text-right text-[10px] font-mono text-slate-400 print:text-slate-700">
+          <div className="font-bold text-slate-200 print:text-black">COMARA • RH / SPTF</div>
+          <div>Documento Oficial</div>
         </div>
       </div>
 

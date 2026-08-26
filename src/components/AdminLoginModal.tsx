@@ -12,6 +12,7 @@ import {
   Sparkles 
 } from 'lucide-react';
 import { authService } from '../services/authService';
+import { ComaraLogo } from './ComaraLogo';
 
 interface AdminLoginModalProps {
   isOpen: boolean;
@@ -105,13 +106,13 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
           <X className="w-4 h-4" />
         </button>
 
-        {/* Modal Header */}
+        {/* Modal Header with Official COMARA Shield */}
         <div className="text-center space-y-2 pt-2">
-          <div className="w-12 h-12 rounded-2xl bg-blue-600/10 border border-blue-500/20 text-blue-500 flex items-center justify-center mx-auto">
-            <Key className="w-6 h-6" />
+          <div className="flex justify-center mb-1">
+            <ComaraLogo size="lg" />
           </div>
           <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight">
-            Acesso à Gestão & RH
+            Acesso à Gestão & RH • COMARA
           </h2>
           <p className={`text-xs ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
             Área restrita a Gestores de RH, Auditores e Super Administradores

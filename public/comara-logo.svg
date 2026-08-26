@@ -1,0 +1,239 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 480" width="400" height="480">
+  <defs>
+    <!-- Filtros de sombra e profundidade -->
+    <filter id="shieldShadow" x="-10%" y="-10%" width="125%" height="125%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+    
+    <linearGradient id="metalBorder" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#adb4bc"/>
+      <stop offset="30%" stop-color="#d5dbe2"/>
+      <stop offset="70%" stop-color="#70767f"/>
+      <stop offset="100%" stop-color="#4a4f56"/>
+    </linearGradient>
+
+    <linearGradient id="innerMetal" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#8c939d"/>
+      <stop offset="100%" stop-color="#4c5158"/>
+    </linearGradient>
+
+    <linearGradient id="bannerBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1b4985"/>
+      <stop offset="100%" stop-color="#12315c"/>
+    </linearGradient>
+
+    <linearGradient id="silverText" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="40%" stop-color="#e2e8f0"/>
+      <stop offset="70%" stop-color="#94a3b8"/>
+      <stop offset="100%" stop-color="#cbd5e1"/>
+    </linearGradient>
+
+    <linearGradient id="skyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#5599e8"/>
+      <stop offset="100%" stop-color="#7cb3f2"/>
+    </linearGradient>
+
+    <linearGradient id="riverGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2b7cd3"/>
+      <stop offset="100%" stop-color="#4092e8"/>
+    </linearGradient>
+
+    <!-- Clip Path para o corpo do escudo (U-shape) -->
+    <clipPath id="shieldBodyClip">
+      <path d="M 16 112 L 384 112 L 384 270 C 384 376 302 464 200 464 C 98 464 16 376 16 270 Z" />
+    </clipPath>
+  </defs>
+
+  <!-- ================= ESCUDO EXTERNO METÁLICO (Borda com topo reto e base arredondada) ================= -->
+  <!-- Borda Externa Principal -->
+  <path d="M 10 10 L 390 10 L 390 270 C 390 380 305 470 200 470 C 95 470 10 380 10 270 Z" 
+        fill="url(#metalBorder)" 
+        stroke="#2d3239" 
+        stroke-width="3" 
+        filter="url(#shieldShadow)" />
+
+  <!-- Borda Interna / Filete Escuro -->
+  <path d="M 14 14 L 386 14 L 386 270 C 386 377 303 466 200 466 C 97 466 14 377 14 270 Z" 
+        fill="#262a30" />
+
+  <!-- ================= BANNER SUPERIOR: COMARA & GLÁDIO ALADO ================= -->
+  <!-- Fundo Azul do Banner -->
+  <rect x="16" y="16" width="368" height="92" fill="url(#bannerBg)" stroke="#262a30" stroke-width="2" />
+
+  <!-- Gládio Alado FAB (Esquerda) -->
+  <g transform="translate(68, 62) scale(0.65)">
+    <!-- Asas Estilizadas -->
+    <path d="M 0 -15 C -25 -40 -65 -35 -85 -5 C -65 15 -35 15 0 5 C 35 15 65 15 85 -5 C 65 -35 25 -40 0 -15 Z" 
+          fill="#d0d7de" stroke="#484f58" stroke-width="2" />
+    <path d="M -8 -12 C -30 -30 -60 -25 -75 -2 C -55 10 -30 10 -8 4 Z" fill="#ffffff" opacity="0.6"/>
+    <path d="M 8 -12 C 30 -30 60 -25 75 -2 C 55 10 30 10 8 4 Z" fill="#ffffff" opacity="0.6"/>
+    <!-- Penas da Asa Esquerda -->
+    <path d="M -20 0 L -75 -4 M -15 -5 L -65 -15 M -10 -10 L -50 -25" stroke="#484f58" stroke-width="1.5" />
+    <!-- Penas da Asa Direita -->
+    <path d="M 20 0 L 75 -4 M 15 -5 L 65 -15 M 10 -10 L 50 -25" stroke="#484f58" stroke-width="1.5" />
+    
+    <!-- Espada Central (Gládio) -->
+    <!-- Empunhadura / Pomo -->
+    <circle cx="0" cy="-32" r="4" fill="#ffffff" stroke="#333" stroke-width="1.5"/>
+    <rect x="-3" y="-28" width="6" height="12" fill="#d0d7de" stroke="#333" stroke-width="1.5"/>
+    <rect x="-16" y="-18" width="32" height="4" rx="2" fill="#ffffff" stroke="#333" stroke-width="1.5"/>
+    <!-- Lâmina -->
+    <polygon points="-3,-14 3,-14 2,28 0,35 -2,28" fill="#ffffff" stroke="#333" stroke-width="1.5"/>
+    <line x1="0" y1="-14" x2="0" y2="33" stroke="#94a3b8" stroke-width="1"/>
+
+    <!-- 4 Estrelas do Gládio da Aeronáutica -->
+    <!-- Estrela Esquerda Cima -->
+    <polygon points="-58,22 -55,27 -49,27 -54,31 -52,36 -58,33 -64,36 -62,31 -67,27 -61,27" fill="#ffffff" stroke="#475569" stroke-width="0.8"/>
+    <!-- Estrela Esquerda Baixo -->
+    <polygon points="-32,26 -29,31 -23,31 -28,35 -26,40 -32,37 -38,40 -36,35 -41,31 -35,31" fill="#ffffff" stroke="#475569" stroke-width="0.8"/>
+    <!-- Estrela Direita Baixo -->
+    <polygon points="32,26 35,31 41,31 36,35 38,40 32,37 26,40 28,35 23,31 29,31" fill="#ffffff" stroke="#475569" stroke-width="0.8"/>
+    <!-- Estrela Direita Cima -->
+    <polygon points="58,22 61,27 67,27 62,31 64,36 58,33 52,36 54,31 49,27 55,27" fill="#ffffff" stroke="#475569" stroke-width="0.8"/>
+  </g>
+
+  <!-- Letreiro COMARA em Prata com Chanfro Oficial -->
+  <text x="250" y="80" 
+        font-family="'Arial Black', 'Impact', sans-serif" 
+        font-size="54" 
+        font-weight="900" 
+        letter-spacing="2" 
+        fill="url(#silverText)" 
+        stroke="#1a202c" 
+        stroke-width="3" 
+        text-anchor="middle">COMARA</text>
+
+  <!-- Linha divisória entre banner e corpo do escudo -->
+  <rect x="14" y="108" width="372" height="5" fill="#2d3239" />
+
+  <!-- ================= CORPO PRINCIPAL DO ESCUDO (DENTRO DO CLIP) ================= -->
+  <g clip-path="url(#shieldBodyClip)">
+    
+    <!-- Céu Azul Amazônico -->
+    <rect x="16" y="112" width="368" height="352" fill="url(#skyGrad)" />
+
+    <!-- Floresta Amazônica Verde ao Fundo -->
+    <path d="M 16 260 
+             C 40 240, 70 235, 100 245 
+             C 125 210, 160 205, 190 225 
+             C 220 200, 260 215, 290 240 
+             C 320 230, 355 245, 384 270 
+             L 384 464 L 16 464 Z" 
+          fill="#236e28" stroke="#164e1a" stroke-width="1.5" />
+    
+    <path d="M 30 265 
+             C 60 250, 90 245, 120 255 
+             C 150 230, 180 235, 210 250 
+             C 240 235, 270 245, 300 260 
+             C 330 255, 360 265, 384 280 
+             L 384 464 L 16 464 Z" 
+          fill="#2e8534" opacity="0.9" />
+
+    <!-- Solo de Terra Vermelha Amazônica (Latossolo / Barro Vermelho) -->
+    <path d="M 16 310 
+             C 60 295, 130 270, 200 250 
+             C 260 230, 310 240, 340 275
+             C 360 300, 370 340, 345 390
+             C 325 430, 280 445, 200 440
+             C 140 435, 60 410, 16 380 Z" 
+          fill="#d8361e" stroke="#9e2210" stroke-width="2" />
+
+    <!-- Arco de Concreto Monumental (Símbolo da Engenharia da COMARA) -->
+    <!-- Corpo do Arco -->
+    <path d="M 24 285 
+             C 50 180, 130 155, 210 155 
+             C 290 155, 360 185, 380 305 
+             L 360 300 
+             C 340 200, 280 180, 210 180 
+             C 140 180, 65 205, 45 285 Z" 
+          fill="#b0b7be" stroke="#33383f" stroke-width="2.5" />
+
+    <!-- Blocos / Articulações de Concreto no Arco (Detalhamento Arquitetônico) -->
+    <!-- Bloco 1 -->
+    <polygon points="35,260 52,260 62,225 45,225" fill="#c8cfd6" stroke="#474f58" stroke-width="1.5"/>
+    <!-- Bloco 2 -->
+    <polygon points="50,220 68,220 85,188 67,188" fill="#dce2e8" stroke="#474f58" stroke-width="1.5"/>
+    <!-- Bloco 3 -->
+    <polygon points="75,185 95,185 120,165 100,165" fill="#c8cfd6" stroke="#474f58" stroke-width="1.5"/>
+    <!-- Bloco 4 (Topo Esquerda) -->
+    <polygon points="110,162 135,162 165,154 140,154" fill="#dce2e8" stroke="#474f58" stroke-width="1.5"/>
+    <!-- Bloco 5 (Chave Central) -->
+    <polygon points="175,152 205,152 205,178 175,178" fill="#e9eff5" stroke="#474f58" stroke-width="1.5"/>
+    <!-- Bloco 6 (Topo Direita) -->
+    <polygon points="215,152 245,154 275,162 245,162" fill="#c8cfd6" stroke="#474f58" stroke-width="1.5"/>
+    <!-- Bloco 7 -->
+    <polygon points="255,165 285,165 310,185 280,185" fill="#dce2e8" stroke="#474f58" stroke-width="1.5"/>
+    <!-- Bloco 8 -->
+    <polygon points="290,188 318,188 340,220 312,220" fill="#c8cfd6" stroke="#474f58" stroke-width="1.5"/>
+    <!-- Bloco 9 -->
+    <polygon points="320,225 348,225 365,265 337,265" fill="#c0c7ce" stroke="#474f58" stroke-width="1.5"/>
+
+    <!-- Pista de Pouso Asfaltada em Perspectiva Cruzando a Amazônia -->
+    <!-- Pista Asfáltica Negra -->
+    <polygon points="24 330, 290 230, 305 235, 120 380" 
+             fill="#181a1f" stroke="#000000" stroke-width="2" />
+    
+    <!-- Faixas de Cabeceira da Pista (Zebradas / Threshold) -->
+    <g stroke="#ffffff" stroke-width="3" stroke-linecap="round">
+      <line x1="38" y1="334" x2="52" y2="340" />
+      <line x1="46" y1="331" x2="60" y2="337" />
+      <line x1="54" y1="328" x2="68" y2="334" />
+      <line x1="62" y1="325" x2="76" y2="331" />
+      <line x1="70" y1="322" x2="84" y2="328" />
+      <line x1="78" y1="319" x2="92" y2="325" />
+    </g>
+
+    <!-- Linha Central Pontilhada da Pista de Aviação -->
+    <line x1="65" y1="325" x2="295" y2="233" 
+          stroke="#ffffff" stroke-width="2.5" stroke-dasharray="8,6" />
+
+    <!-- Pátio de Aeronaves / Tarmac Extension -->
+    <polygon points="120 345, 235 305, 225 375, 175 370" fill="#181a1f" stroke="#000000" stroke-width="1.5" />
+
+    <!-- Edificação Operacional / Hangar com Telhado Vermelho e Biruta/Antena -->
+    <g transform="translate(200, 340)">
+      <!-- Parede Branca -->
+      <polygon points="0,15 35,5 45,18 10,28" fill="#ffffff" stroke="#333" stroke-width="1"/>
+      <polygon points="0,15 -8,22 2,35 10,28" fill="#e2e8f0" stroke="#333" stroke-width="1"/>
+      <!-- Porta/Hangar Escura -->
+      <polygon points="12,24 24,20 26,26 14,30" fill="#181a1f"/>
+      <!-- Telhado Vermelho em Perspectiva -->
+      <polygon points="-2,12 35,2 42,9 5,19" fill="#dc2626" stroke="#7f1d1d" stroke-width="1"/>
+      <polygon points="-2,12 -10,18 2,24 5,19" fill="#b91c1c" stroke="#7f1d1d" stroke-width="1"/>
+      <!-- Mastro / Biruta -->
+      <line x1="32" y1="2" x2="32" y2="-12" stroke="#ffffff" stroke-width="1.2"/>
+      <polygon points="32,-12 42,-10 32,-8" fill="#ffffff" stroke="#dc2626" stroke-width="0.5"/>
+    </g>
+
+    <!-- Rio Amazônico Sinuoso (Azul Vivo na base esquerda) -->
+    <path d="M 16 350 
+             C 45 355, 60 365, 80 375 
+             C 105 388, 110 405, 140 420 
+             C 170 435, 200 455, 230 464 
+             L 210 464 
+             C 180 450, 150 430, 120 415 
+             C 90 400, 75 385, 45 375 
+             C 30 370, 20 372, 16 372 Z" 
+          fill="url(#riverGrad)" stroke="#1e5899" stroke-width="1.5" />
+
+    <!-- Gramado / Vegetação Ciliar Marginal Verde -->
+    <path d="M 16 372 
+             C 25 372, 45 375, 65 385 
+             C 95 400, 115 415, 145 430 
+             C 175 445, 195 458, 220 464 
+             L 16 464 Z" 
+          fill="#348a39" stroke="#1f5d24" stroke-width="1.5" />
+
+    <path d="M 230 464 
+             C 250 464, 320 430, 384 370 
+             L 384 464 L 230 464 Z" 
+          fill="#2b7a30" stroke="#1f5d24" stroke-width="1.5" />
+  </g>
+
+  <!-- Filete Interno de Contorno do Escudo para Acabamento Perfeito -->
+  <path d="M 16 112 L 384 112 L 384 270 C 384 376 302 464 200 464 C 98 464 16 376 16 270 Z" 
+        fill="none" 
+        stroke="url(#innerMetal)" 
+        stroke-width="3" />
+</svg>

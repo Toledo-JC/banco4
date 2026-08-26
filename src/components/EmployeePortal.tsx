@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Employee, TimeRecord, Attachment } from '../types';
+import { ComaraLogo } from './ComaraLogo';
 import { 
   ShieldCheck, 
   Lock, 
@@ -136,16 +137,16 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({
     return (
       <div className="min-h-[80vh] flex flex-col items-center justify-center px-4 py-8">
         <div className="w-full max-w-md">
-          {/* Header Card */}
-          <div className="text-center mb-6">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-500/10 border border-blue-500/30 text-blue-400 mb-3 shadow-lg shadow-blue-500/10">
-              <ShieldCheck className="w-8 h-8" />
+          {/* Header Card with Official COMARA Shield */}
+          <div className="text-center mb-6 space-y-2">
+            <div className="flex justify-center mb-1">
+              <ComaraLogo size="xl" />
             </div>
             <h1 className="text-xl font-bold text-white tracking-tight">
-              Portal do Colaborador
+              Portal do Colaborador • COMARA
             </h1>
-            <p className="text-xs text-[#8E9299] mt-1 font-mono">
-              Consulta Segura de Extrato de Banco de Horas SPTF
+            <p className="text-xs text-[#8E9299] font-mono">
+              Comissão de Aeroportos da Região Amazônica • SPTF
             </p>
           </div>
 

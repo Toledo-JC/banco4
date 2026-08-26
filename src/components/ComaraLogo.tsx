@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 
 interface ComaraLogoProps {
   logoUrl?: string;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
   showText?: boolean;
   subtitle?: string;
   theme?: 'dark' | 'light';
@@ -11,7 +11,7 @@ interface ComaraLogoProps {
 }
 
 export const ComaraLogo: React.FC<ComaraLogoProps> = ({
-  logoUrl = '/logo.png',
+  logoUrl = '/comara-logo.png',
   size = 'md',
   showText = false,
   subtitle = 'Comissão de Aeroportos da Região Amazônica',
@@ -22,12 +22,13 @@ export const ComaraLogo: React.FC<ComaraLogoProps> = ({
   const isDark = theme === 'dark';
   const [imageError, setImageError] = useState(false);
 
-  // Size mapping for the insignia / emblem
+  // Size mapping for the insignia / emblem (flat top, rounded bottom)
   const sizeClasses = {
-    sm: 'w-8 h-8 text-xs',
-    md: 'w-10 h-10 text-sm',
-    lg: 'w-14 h-14 text-base',
-    xl: 'w-20 h-20 text-lg',
+    sm: 'h-8 w-auto max-h-8',
+    md: 'h-10 w-auto max-h-10',
+    lg: 'h-14 w-auto max-h-14',
+    xl: 'h-20 w-auto max-h-20',
+    '2xl': 'h-28 w-auto max-h-28',
   };
 
   const textSizes = {
@@ -35,25 +36,24 @@ export const ComaraLogo: React.FC<ComaraLogoProps> = ({
     md: { title: 'text-sm', sub: 'text-[10px]' },
     lg: { title: 'text-base sm:text-lg', sub: 'text-xs' },
     xl: { title: 'text-xl sm:text-2xl', sub: 'text-xs sm:text-sm' },
+    '2xl': { title: 'text-2xl sm:text-3xl', sub: 'text-sm' },
   };
 
-  const effectiveLogoUrl = logoUrl && logoUrl.trim().length > 0 ? logoUrl : '/logo.png';
+  const effectiveLogoUrl = (logoUrl && logoUrl.trim().length > 0) ? logoUrl : '/comara-logo.png';
   const hasCustomImage = Boolean(effectiveLogoUrl && !imageError);
 
   return (
     <div 
       className={`inline-flex items-center gap-3 select-none ${onClick ? 'cursor-pointer' : ''} ${className}`}
       onClick={onClick}
-      title={onClick ? 'Clique para gerenciar a logomarca da COMARA' : 'COMARA - Força Aérea Brasileira'}
+      title={onClick ? 'Clique para gerenciar a logomarca da COMARA' : 'COMARA - Comissão de Aeroportos da Região Amazônica (FAB)'}
     >
       {hasCustomImage ? (
-        <div className={`relative shrink-0 flex items-center justify-center rounded-xl overflow-hidden shadow-md border ${
-          sizeClasses[size]
-        } ${isDark ? 'bg-[#15171C] border-[#2A2E38]' : 'bg-white border-slate-200'}`}>
+        <div className="relative shrink-0 flex items-center justify-center">
           <img
             src={effectiveLogoUrl}
-            alt="Logomarca COMARA"
-            className="w-full h-full object-contain p-0.5"
+            alt="Brasão Oficial COMARA"
+            className={`${sizeClasses[size]} object-contain drop-shadow-md transition-transform hover:scale-105 filter`}
             referrerPolicy="no-referrer"
             onError={() => setImageError(true)}
           />

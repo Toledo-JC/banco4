@@ -88,7 +88,7 @@ export const ContrachequeMirrorView: React.FC<ContrachequeMirrorViewProps> = ({
         <div className="border-b-2 border-slate-300/60 pb-4 mb-5">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-3.5 text-center sm:text-left">
-              <ComaraLogo size="md" />
+              <ComaraLogo size="lg" />
               <div>
                 <h1 className="text-xs font-black tracking-widest uppercase text-blue-600 print:text-blue-900">
                   COMANDO DA AERONÁUTICA

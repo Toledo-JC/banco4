@@ -307,11 +307,14 @@ export const CollaboratorLandingView: React.FC<CollaboratorLandingViewProps> = (
         {!authenticatedEmployee ? (
           <div className="w-full max-w-lg space-y-6 animate-in fade-in zoom-in-95 duration-200">
             
-            {/* Banner de Boas-Vindas */}
-            <div className="text-center space-y-2">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20 mb-1">
+            {/* Banner de Boas-Vindas com Brasão Oficial da COMARA */}
+            <div className="text-center space-y-3">
+              <div className="flex justify-center">
+                <ComaraLogo size="xl" />
+              </div>
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/20">
                 <ShieldCheck className="w-3.5 h-3.5" />
-                <span>Ambiente Seguro • Em Conformidade com a LGPD</span>
+                <span>COMARA • Ambiente Seguro • Em Conformidade com a LGPD</span>
               </div>
               <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
                 Consulte seu Banco de Horas

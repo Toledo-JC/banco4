@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Employee, PaystubRecord, AdminRole } from '../types';
 import { ContrachequeMirrorView } from './ContrachequeMirrorView';
 import { ImportContrachequeModal } from './ImportContrachequeModal';
+import { normalizeMatricula } from '../utils/pdfParser';
 import { 
   FileText, 
   UploadCloud, 
@@ -26,6 +27,7 @@ interface ContrachequesManagementProps {
   employees: Employee[];
   paystubs: PaystubRecord[];
   onSaveBatchPaystubs: (paystubs: PaystubRecord[]) => Promise<void>;
+  onSaveEmployees?: (employees: Employee[]) => Promise<void>;
   onDeletePaystub: (id: string) => Promise<void>;
   theme?: 'dark' | 'light';
   currentUserEmail?: string;
@@ -36,6 +38,7 @@ export const ContrachequesManagement: React.FC<ContrachequesManagementProps> = (
   employees,
   paystubs,
   onSaveBatchPaystubs,
+  onSaveEmployees,
   onDeletePaystub,
   theme = 'dark',
   currentUserEmail = 'coari.comara@gmail.com',
@@ -61,11 +64,16 @@ export const ContrachequesManagement: React.FC<ContrachequesManagementProps> = (
 
   // Filtros aplicados
   const filteredPaystubs = useMemo(() => {
+    const term = searchTerm.toLowerCase().trim();
+    const normTerm = normalizeMatricula(term);
+
     return paystubs.filter((p) => {
       const matchSearch =
-        p.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.matricula.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        p.cargo.toLowerCase().includes(searchTerm.toLowerCase());
+        !term ||
+        p.nome.toLowerCase().includes(term) ||
+        p.matricula.toLowerCase().includes(term) ||
+        normalizeMatricula(p.matricula).includes(normTerm) ||
+        p.cargo.toLowerCase().includes(term);
 
       const matchMes = selectedMesAno === 'TODOS' || p.mesAno === selectedMesAno;
       const matchSede = selectedSede === 'TODAS' || p.sede === selectedSede || (selectedSede === 'KO' && p.sede.startsWith('KO'));
@@ -262,6 +270,7 @@ export const ContrachequesManagement: React.FC<ContrachequesManagementProps> = (
                 <th className="py-3 px-4">Cargo / Função</th>
                 <th className="py-3 px-4 text-center">Sede</th>
                 <th className="py-3 px-4 text-center">Competência</th>
+                <th className="py-3 px-4 text-right">Salário Base</th>
                 <th className="py-3 px-4 text-right">Vencimentos</th>
                 <th className="py-3 px-4 text-right">Descontos</th>
                 <th className="py-3 px-4 text-right">Líquido a Receber</th>
@@ -294,6 +303,9 @@ export const ContrachequesManagement: React.FC<ContrachequesManagementProps> = (
                     <td className="py-3 px-4 text-center font-mono font-medium">
                       {p.periodo || p.mesAno}
                     </td>
+                    <td className="py-3 px-4 text-right font-mono font-medium text-slate-300">
+                      R$ {p.salarioBase ? p.salarioBase.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) : '-'}
+                    </td>
                     <td className="py-3 px-4 text-right font-mono font-semibold text-emerald-500">
                       R$ {p.totalProventos.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </td>
@@ -307,7 +319,7 @@ export const ContrachequesManagement: React.FC<ContrachequesManagementProps> = (
                       <div className="flex items-center justify-center gap-1.5">
                         <button
                           onClick={() => setSelectedPaystubForView(p)}
-                          className="p-1.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 transition-colors"
+                          className="p-1.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 transition-colors cursor-pointer"
                           title="Visualizar Espelho Digital"
                         >
                           <Eye className="w-3.5 h-3.5" />
@@ -317,14 +329,14 @@ export const ContrachequesManagement: React.FC<ContrachequesManagementProps> = (
                             setSelectedPaystubForView(p);
                             setTimeout(() => window.print(), 300);
                           }}
-                          className="p-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-colors"
+                          className="p-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-colors cursor-pointer"
                           title="Imprimir / Baixar PDF"
                         >
                           <Printer className="w-3.5 h-3.5" />
                         </button>
                         <button
                           onClick={() => onDeletePaystub(p.id)}
-                          className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors"
+                          className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors cursor-pointer"
                           title="Excluir Contracheque"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -335,7 +347,7 @@ export const ContrachequesManagement: React.FC<ContrachequesManagementProps> = (
                 ))
               ) : (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-400">
+                  <td colSpan={10} className="py-12 text-center text-slate-400">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <FileText className="w-8 h-8 text-slate-500 stroke-1" />
                       <p className="font-semibold text-sm">Nenhum contracheque encontrado com os filtros atuais.</p>
@@ -354,6 +366,8 @@ export const ContrachequesManagement: React.FC<ContrachequesManagementProps> = (
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         onImportBatch={onSaveBatchPaystubs}
+        onSaveEmployees={onSaveEmployees}
+        employees={employees}
         theme={theme}
         currentUserEmail={currentUserEmail}
       />

@@ -1,5 +1,5 @@
 import * as pdfjsLib from 'pdfjs-dist';
-import { PaystubRecord, PaystubRubrica } from '../types';
+import { PaystubRecord, PaystubRubrica, Employee, Branch } from '../types';
 
 // Configure worker safely for browser environments (Vite)
 if (typeof window !== 'undefined') {
@@ -11,28 +11,58 @@ if (typeof window !== 'undefined') {
   }
 }
 
+/**
+ * Normaliza matrícula removendo zeros à esquerda e espaços (ex: "013974" -> "13974")
+ */
+export function normalizeMatricula(mat: string | undefined | null): string {
+  if (!mat) return '';
+  const clean = mat.toString().trim().toUpperCase().replace(/^0+/, '');
+  return clean || '0';
+}
+
+/**
+ * Formata matrícula visualmente com 6 dígitos se for número puro (ex: "13974" -> "013974")
+ */
+export function formatMatriculaVisual(mat: string | undefined | null): string {
+  if (!mat) return '';
+  const clean = normalizeMatricula(mat);
+  if (/^\d+$/.test(clean) && clean.length < 6) {
+    return clean.padStart(6, '0');
+  }
+  return clean;
+}
+
 export interface ParsePaystubResult {
   paystubs: PaystubRecord[];
   totalPages: number;
   totalExtracted: number;
+  unregisteredEmployees: {
+    matricula: string;
+    nome: string;
+    cargo: string;
+    sede: string;
+  }[];
   warnings: string[];
 }
 
 /**
- * Converte string de moeda brasileira (ex: "3.450,80" ou "3450.80") para número
+ * Converte string de moeda brasileira (ex: "2.830,38", "560,53", "1.192,00", "354,95") para número float
  */
 export function parseCurrencyBR(valStr: string | undefined | null): number {
   if (!valStr) return 0;
-  const clean = valStr.trim().replace(/[R$\s]/g, '');
+  let clean = valStr.trim().replace(/[R$\s]/g, '');
   if (!clean) return 0;
 
-  // Se tiver vírgula e ponto (ex: 1.234,56)
+  // Remove caracteres percentuais ou sufixos se houver
+  clean = clean.replace(/[%]/g, '').trim();
+
+  // Se tiver vírgula e ponto (ex: 2.830,38)
   if (clean.includes(',') && clean.includes('.')) {
     const normalized = clean.replace(/\./g, '').replace(',', '.');
     const n = parseFloat(normalized);
     return isNaN(n) ? 0 : n;
   }
-  // Se tiver apenas vírgula (ex: 1234,56)
+  // Se tiver apenas vírgula (ex: 560,53 ou 124,54)
   if (clean.includes(',')) {
     const normalized = clean.replace(',', '.');
     const n = parseFloat(normalized);
@@ -44,7 +74,7 @@ export function parseCurrencyBR(valStr: string | undefined | null): number {
 }
 
 /**
- * Extrai texto posicional ordenado de uma página do PDF
+ * Extrai texto posicional ordenado de uma página do PDF com tolerância adaptativa
  */
 async function extractLinesFromPdfPage(page: any): Promise<string[]> {
   const textContent = await page.getTextContent({ normalizeWhitespace: true });
@@ -57,7 +87,7 @@ async function extractLinesFromPdfPage(page: any): Promise<string[]> {
 
   if (!items || items.length === 0) return [];
 
-  // Agrupa itens por coordenada Y (linhas visuais) com tolerância de 3.5px
+  // Agrupa itens por coordenada Y (linhas visuais) com tolerância de 4.5px
   const linesMap: { y: number; items: typeof items }[] = [];
 
   for (const item of items) {
@@ -65,10 +95,9 @@ async function extractLinesFromPdfPage(page: any): Promise<string[]> {
     if (!text) continue;
 
     const y = item.transform[5];
-    const x = item.transform[4];
 
     // Procura linha próxima
-    let existingLine = linesMap.find((l) => Math.abs(l.y - y) <= 3.5);
+    let existingLine = linesMap.find((l) => Math.abs(l.y - y) <= 4.5);
     if (!existingLine) {
       existingLine = { y, items: [] };
       linesMap.push(existingLine);
@@ -99,8 +128,8 @@ export function isRubricaDesconto(codigo: string, descricao: string): boolean {
   const descUpper = descricao.toUpperCase();
   const codNum = parseInt(codigo, 10);
 
-  // Códigos típicos de descontos
-  if ([611, 901, 902, 903, 904, 905, 908, 910, 911, 915, 920, 925, 930, 940, 950, 999].includes(codNum)) {
+  // Códigos típicos de descontos da COMARA / Aeronáutica
+  if ([611, 612, 613, 614, 615, 620, 630, 901, 902, 903, 904, 905, 908, 910, 911, 915, 920, 925, 930, 940, 950, 999].includes(codNum)) {
     return true;
   }
 
@@ -126,6 +155,77 @@ export function isRubricaDesconto(codigo: string, descricao: string): boolean {
 }
 
 /**
+ * Tenta separar Nome de Servidor e Cargo quando aparecem na mesma linha
+ * Ex: "013974 OTNIEL DA ROCHA CABRAL MECANICO DE MANUTENCAO DE MAQUINAS DE CONSTRUCAO E"
+ */
+export function extractNomeAndCargo(rawText: string): { nome: string; cargo: string } {
+  let clean = rawText.trim();
+
+  // Lista de palavras-chave que marcam o início da função/cargo na COMARA
+  const cargoKeywords = [
+    'MECANICO',
+    'MECÂNICO',
+    'OPERADOR',
+    'MOTORISTA',
+    'ELETRICISTA',
+    'PEDREIRO',
+    'SERVENTE',
+    'CARPINTEIRO',
+    'ARMADOR',
+    'APONTADOR',
+    'ENCARREGADO',
+    'SOLDADOR',
+    'TECNICO',
+    'TÉCNICO',
+    'AUXILIAR',
+    'ENGENHEIRO',
+    'TOPOGRAFO',
+    'TOPÓGRAFO',
+    'ANALISTA',
+    'ALMOXARIFE',
+    'BORRACHEIRO',
+    'LUBRIFICADOR',
+    'FEITOR',
+    'VIGIA',
+    'AGENTE',
+    'ASSISTENTE'
+  ];
+
+  const words = clean.split(/\s+/);
+  let splitIndex = -1;
+
+  for (let i = 1; i < words.length; i++) {
+    const wordUpper = words[i].toUpperCase();
+    if (cargoKeywords.some(k => wordUpper === k || wordUpper.startsWith(k))) {
+      splitIndex = i;
+      break;
+    }
+  }
+
+  if (splitIndex !== -1) {
+    const nome = words.slice(0, splitIndex).join(' ').trim();
+    const cargo = words.slice(splitIndex).join(' ').trim();
+    return {
+      nome: nome || clean,
+      cargo: cargo || 'COLABORADOR DA CONSTRUÇÃO'
+    };
+  }
+
+  // Fallback: se não encontrar palavra-chave de cargo, considera as 3 ou 4 primeiras palavras como nome
+  if (words.length > 4) {
+    return {
+      nome: words.slice(0, 4).join(' ').trim(),
+      cargo: words.slice(4).join(' ').trim()
+    };
+  }
+
+  return {
+    nome: clean,
+    cargo: 'COLABORADOR DA CONSTRUÇÃO'
+  };
+}
+
+/**
  * Parser de texto de um contracheque individual da COMARA
  */
 export function parseSingleContrachequeText(
@@ -135,6 +235,7 @@ export function parseSingleContrachequeText(
 ): PaystubRecord | null {
   if (!lines || lines.length === 0) return null;
 
+  let rawMatricula = '';
   let matricula = '';
   let nome = '';
   let cargo = '';
@@ -161,57 +262,41 @@ export function parseSingleContrachequeText(
 
   const rubricas: PaystubRubrica[] = [];
 
-  // 1. Extração de Matrícula e Nome
-  // Regex oficial: ^(\d{6})\s+(.+) (ex: "013853 CLESIO DE SOUZA FARO LOPES")
-  const matriculaNomeRegex = /(?:^|\s)(?:MATR[ÍI]CULA|MATR?\.?|SERV\.?)?[:\s]*(\d{6})\s+([A-ZÀ-Ú\s\.\'\-]{3,60})/i;
-  
+  // Percorre as linhas do contracheque
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    const line = lines[i].trim();
+    if (!line) continue;
 
-    // Busca Matrícula e Nome
+    // 1. Extração de Matrícula, Nome e Cargo
+    // Ex: "013974 OTNIEL DA ROCHA CABRAL MECANICO DE MANUTENCAO DE MAQUINAS DE CONSTRUCAO E"
+    // Ex: "013974 OTNIEL DA ROCHA CABRAL"
     if (!matricula) {
-      const match = line.match(matriculaNomeRegex);
-      if (match) {
-        matricula = match[1].trim();
-        nome = match[2].trim().replace(/\s+(OPERADOR|MOTORISTA|ELETRICISTA|CARGO|SEDE|CANTEIRO).*/i, '').trim();
+      const matLineMatch = line.match(/^(\d{5,7})\s+([A-ZÀ-Ú\s\.\'\-]{3,})/i);
+      if (matLineMatch) {
+        rawMatricula = matLineMatch[1].trim();
+        matricula = normalizeMatricula(rawMatricula); // "013974" -> "13974"
+        const restOfLine = matLineMatch[2].trim();
+        const extracted = extractNomeAndCargo(restOfLine);
+        nome = extracted.nome;
+        if (!cargo || cargo === 'COLABORADOR DA CONSTRUÇÃO') {
+          cargo = extracted.cargo;
+        }
       } else {
-        // Fallback: 6 dígitos isolados seguidos de nome na mesma linha
-        const directMatch = line.match(/^(\d{6})\s+([A-ZÀ-Ú\s]{3,})/);
-        if (directMatch) {
-          matricula = directMatch[1].trim();
-          nome = directMatch[2].trim();
+        const matExplicitMatch = line.match(/(?:MATR[ÍI]CULA|MATR?\.?|SERV\.?)?[:\s]*(\d{5,7})\s+([A-ZÀ-Ú\s\.\'\-]{3,})/i);
+        if (matExplicitMatch) {
+          rawMatricula = matExplicitMatch[1].trim();
+          matricula = normalizeMatricula(rawMatricula);
+          const restOfLine = matExplicitMatch[2].trim();
+          const extracted = extractNomeAndCargo(restOfLine);
+          nome = extracted.nome;
+          if (!cargo) cargo = extracted.cargo;
         }
       }
     }
 
-    // Busca Cargo / Função
-    if (!cargo) {
-      // Se linha contém "CARGO:" ou "FUNÇÃO:"
-      const cargoPrefixMatch = line.match(/(?:CARGO|FUN[CÇ][AÃ]O|OCUPA[CÇ][AÃ]O)[:\s]+([A-ZÀ-Ú0-9\s\.\-\/]+)/i);
-      if (cargoPrefixMatch) {
-        cargo = cargoPrefixMatch[1].trim();
-      } else if (
-        line.match(/(OPERADOR DE|ELETRICISTA|MOTORISTA|SERVENTE|PEDREIRO|CARPINTEIRO|ENCARREGADO|APONTADOR|MECANICO|SOLDADOR|TECNICO|AUXILIAR|ENGENHEIRO|ANALISTA|TOPOGRAFO)/i) &&
-        !line.includes('COMISSÃO') && !line.includes('COMANDO') && !line.includes('AERONÁUTICA')
-      ) {
-        // Linha identificada com nome de cargo da COMARA
-        cargo = line.replace(/^(?:CARGO|FUNCAO|FUNÇÃO)[:\s]*/i, '').trim();
-      }
-    }
-
-    // Busca Sede (ex: KO-DL, KO, BE, MN, etc.)
-    if (line.match(/(?:SEDE|CANTEIRO|LOTA[CÇ][AÃ]O|UNIDADE)[:\s]*([A-Z]{2}(?:-[A-Z0-9]+)?)/i)) {
-      const matchSede = line.match(/(?:SEDE|CANTEIRO|LOTA[CÇ][AÃ]O|UNIDADE)[:\s]*([A-Z]{2}(?:-[A-Z0-9]+)?)/i);
-      if (matchSede) sede = matchSede[1].toUpperCase();
-    } else if (line.match(/\b(KO-DL|KO|BE|MN|MN-AM|BE-PA|COARI|BEL[EÉ]M|MANAUS)\b/i)) {
-      const matchSede = line.match(/\b(KO-DL|KO|BE|MN|MN-AM|BE-PA|COARI|BEL[EÉ]M|MANAUS)\b/i);
-      if (matchSede) {
-        const raw = matchSede[1].toUpperCase();
-        sede = raw === 'COARI' ? 'KO-DL' : raw === 'BELÉM' || raw === 'BELEM' ? 'BE' : raw === 'MANAUS' ? 'MN' : raw;
-      }
-    }
-
-    // Busca Período / Competência (ex: "01/07/2026 a 31/07/2026" ou "07/2026" ou "JULHO/2026")
+    // 2. Extração de Sede e Período
+    // Ex: "01/07/2026a31/07/2026 KO-DL 00394429009086"
+    // Ex: "01/07/2026 a 31/07/2026 KO-DL"
     const dateRangeMatch = line.match(/(\d{2}\/\d{2}\/\d{4})\s*(?:a|A|à|À|-)\s*(\d{2}\/\d{2}\/\d{4})/);
     if (dateRangeMatch) {
       dataInicio = dateRangeMatch[1];
@@ -223,127 +308,146 @@ export function parseSingleContrachequeText(
         mesAno = `${String(mes).padStart(2, '0')}-${ano}`;
         periodo = `${String(mes).padStart(2, '0')}/${ano}`;
       }
-    } else {
-      const compMatch = line.match(/(?:COMPET[EÊ]NCIA|M[EÊ]S\/ANO|PER[IÍ]ODO)[:\s]*(\d{2})[\/\-](\d{4})/i);
-      if (compMatch) {
-        mes = parseInt(compMatch[1], 10);
-        ano = parseInt(compMatch[2], 10);
-        mesAno = `${String(mes).padStart(2, '0')}-${ano}`;
-        periodo = `${String(mes).padStart(2, '0')}/${ano}`;
+    }
+
+    if (line.match(/\b(KO-DL|KO|BE|MN|MN-AM|BE-PA|COARI|BEL[EÉ]M|MANAUS)\b/i)) {
+      const matchSede = line.match(/\b(KO-DL|KO|BE|MN|MN-AM|BE-PA|COARI|BEL[EÉ]M|MANAUS)\b/i);
+      if (matchSede) {
+        const raw = matchSede[1].toUpperCase();
+        sede = raw === 'COARI' ? 'KO-DL' : raw === 'BELÉM' || raw === 'BELEM' ? 'BE' : raw === 'MANAUS' ? 'MN' : raw;
       }
     }
 
-    // Busca CPF
-    const cpfMatch = line.match(/(?:CPF)[:\s]*(\d{3}\.\d{3}\.\d{3}\-\d{2}|\d{11})/i);
-    if (cpfMatch) {
-      cpf = cpfMatch[1].trim();
-    }
+    // 3. Extração de Rubricas com Suporte a Todos os Formatos da COMARA
+    // Exemplos reais do PDF:
+    // "001 Salário Base 2.830,38"
+    // "060 Auxilio Transporte ATS JUL e AGO/26 560,53"
+    // "600 Auxílio Alimentação 1.192,00"
+    // "722 Auxilio Alimentacao Atrasado JUL 1.192,00"
+    // "611 Desc. auxilio transporte 124,54"
+    // "903 INSS Folha 230,41"
+    const rubricaMatch = line.match(/^(\d{3,4})\s+(.+)$/);
+    if (rubricaMatch) {
+      const cod = rubricaMatch[1].trim();
+      const rest = rubricaMatch[2].trim();
 
-    // Busca Dados Bancários
-    const bancoMatch = line.match(/(?:BANCO|BCO)[:\s]*([A-Z0-9\s]+?)\s+(?:AG[EÊ]NCIA|AG)[:\s]*([0-9\-]+)\s+(?:C\/C|CONTA)[:\s]*([0-9\-]+)/i);
-    if (bancoMatch) {
-      banco = bancoMatch[1].trim();
-      agencia = bancoMatch[2].trim();
-      conta = bancoMatch[3].trim();
-    }
+      // Procura todos os valores monetários no final da linha (ex: "2.830,38" ou "560,53" ou "1.192,00" ou "5.774,91 354,95")
+      // Expressão que localiza números formatados em moeda BR no final da string
+      const valuesMatches = rest.match(/(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})/g);
 
-    // 2. Extração de Rubricas (Linha por Linha)
-    // Ex: "001 Salário Base 30D 3.450,00"
-    // Ex: "032 Aux Transporte 22D 240,00"
-    // Ex: "600 Auxílio Alimentação 650,00"
-    // Ex: "611 Desc. auxilio transporte 6.00% 207,00"
-    // Ex: "903 INSS Folha 14.00% 483,00"
-    const rubricaRegex = /^(\d{3,4})\s+([A-Za-zÀ-ÿ0-9\.\,\-\/\%\(\)\s]+?)(?:\s+(\d+(?:[\:\,\.]\d+)?(?:%|D|H)?))?\s+([\d\.\,]+)(?:\s+([\d\.\,]+))?$/;
-    const rubMatch = line.match(rubricaRegex);
+      if (valuesMatches && valuesMatches.length > 0) {
+        // Encontra onde começam os valores numéricos no final para extrair a descrição
+        const lastValueStr = valuesMatches[valuesMatches.length - 1];
+        const firstValueStr = valuesMatches[0];
+        
+        let desc = rest;
+        // Corta a descrição antes do primeiro valor monetário
+        const firstValIdx = rest.indexOf(firstValueStr);
+        if (firstValIdx > 0) {
+          desc = rest.substring(0, firstValIdx).trim();
+        }
 
-    if (rubMatch) {
-      const cod = rubMatch[1].trim();
-      const desc = rubMatch[2].trim();
-      const ref = rubMatch[3]?.trim() || '';
-      const val1Str = rubMatch[4]?.trim();
-      const val2Str = rubMatch[5]?.trim();
+        // Extrai referência opcional da descrição se houver (ex: "30D", "22D", "14.00%", "6.00%", "12:00")
+        let referencia = '';
+        const refMatch = desc.match(/\b(\d+(?:[\:\,\.]\d+)?(?:%|D|H))\b/i);
+        if (refMatch) {
+          referencia = refMatch[1];
+          desc = desc.replace(refMatch[0], '').trim();
+        }
 
-      // Ignora se for linha de totais ou cabeçalho
-      const descUpper = desc.toUpperCase();
-      if (
-        !descUpper.includes('TOTAL') && 
-        !descUpper.includes('LÍQUIDO') && 
-        !descUpper.includes('LIQUIDO') && 
-        !descUpper.includes('BASE DE CÁLCULO') &&
-        !descUpper.includes('FGTS DO MÊS')
-      ) {
-        const val1 = parseCurrencyBR(val1Str);
-        const val2 = parseCurrencyBR(val2Str);
+        // Descarta se for linha de totais
+        const descUpper = desc.toUpperCase();
+        if (
+          !descUpper.includes('TOTAL') && 
+          !descUpper.includes('LÍQUIDO') && 
+          !descUpper.includes('LIQUIDO') &&
+          !descUpper.includes('BASE DE')
+        ) {
+          let provento = 0;
+          let desconto = 0;
 
-        let provento = 0;
-        let desconto = 0;
-
-        // Se tiver duas colunas de valores, val1 costuma ser Provento e val2 Desconto
-        if (val2Str) {
-          provento = val1;
-          desconto = val2;
-        } else {
-          // Se tiver apenas uma coluna de valor, classifica pela natureza da rubrica
-          const isDesc = isRubricaDesconto(cod, desc);
-          if (isDesc) {
-            desconto = val1;
+          if (valuesMatches.length >= 2) {
+            // Dois valores no final: 1º Provento, 2º Desconto
+            provento = parseCurrencyBR(valuesMatches[valuesMatches.length - 2]);
+            desconto = parseCurrencyBR(valuesMatches[valuesMatches.length - 1]);
           } else {
-            provento = val1;
+            // Um único valor: classifica pela natureza da rubrica
+            const val = parseCurrencyBR(valuesMatches[0]);
+            const isDesc = isRubricaDesconto(cod, desc);
+            if (isDesc) {
+              desconto = val;
+            } else {
+              provento = val;
+            }
+          }
+
+          if (provento > 0 || desconto > 0) {
+            // Se for rubrica 001 (Salário Base), armazena
+            if (cod === '001' && provento > 0) {
+              salarioBase = provento;
+            }
+
+            rubricas.push({
+              codigo: cod,
+              descricao: desc || `Rubrica ${cod}`,
+              referencia,
+              provento,
+              desconto,
+              tipo: desconto > 0 ? 'DESCONTO' : 'PROVENTO'
+            });
           }
         }
+      }
+    }
 
-        if (provento > 0 || desconto > 0) {
-          rubricas.push({
-            codigo: cod,
-            descricao: desc,
-            referencia: ref,
-            provento,
-            desconto,
-            tipo: desconto > 0 ? 'DESCONTO' : 'PROVENTO'
-          });
+    // 4. Extração de Totais e Rodapé (Valores Isolados)
+    // No PDF da Aeronáutica/COMARA:
+    // Linha de Totais: "5.774,91 354,95" (Proventos / Descontos)
+    // Linha de Líquido: "5.419,96"
+    // Linha de Bases: "2.830,38 2.830,38 0,00 0,00 2.223,18 0,00 %"
+    const isPureNumbersLine = /^[\d\.\,\s\%\-]+$/.test(line);
+    if (isPureNumbersLine) {
+      const numbers = line.match(/(\d{1,3}(?:\.\d{3})*,\d{2}|\d+,\d{2})/g);
+      if (numbers) {
+        if (numbers.length === 2 && !line.startsWith('00') && !line.startsWith('01')) {
+          // Ex: "5.774,91 354,95"
+          const v1 = parseCurrencyBR(numbers[0]);
+          const v2 = parseCurrencyBR(numbers[1]);
+          if (v1 > 100 && v2 >= 0) {
+            totalProventos = v1;
+            totalDescontos = v2;
+          }
+        } else if (numbers.length === 1 && !line.startsWith('00')) {
+          // Ex: "5.419,96" (Valor Líquido)
+          const v = parseCurrencyBR(numbers[0]);
+          if (v > 100) {
+            valorLiquido = v;
+          }
+        } else if (numbers.length >= 4) {
+          // Ex: "2.830,38 2.830,38 0,00 0,00 2.223,18 0,00 %" (Bases de Cálculo)
+          if (!salarioBase) salarioBase = parseCurrencyBR(numbers[0]);
+          baseInss = parseCurrencyBR(numbers[1]);
+          baseFgts = parseCurrencyBR(numbers[2]);
+          fgtsMes = parseCurrencyBR(numbers[3]);
+          if (numbers.length >= 5) {
+            baseIrrf = parseCurrencyBR(numbers[4]);
+          }
         }
       }
     }
 
-    // 3. Extração de Totais e Bases Consolidadas no Rodapé
+    // Fallbacks para rótulos explícitos
     if (line.match(/TOTAL\s+(?:DE\s+)?(?:VENCIMENTOS|PROVENTOS)/i)) {
       const matchTot = line.match(/TOTAL\s+(?:DE\s+)?(?:VENCIMENTOS|PROVENTOS)[:\s]*([\d\.\,]+)/i);
       if (matchTot) totalProventos = parseCurrencyBR(matchTot[1]);
     }
-
     if (line.match(/TOTAL\s+(?:DE\s+)?DESCONTOS/i)) {
       const matchTot = line.match(/TOTAL\s+(?:DE\s+)?DESCONTOS[:\s]*([\d\.\,]+)/i);
       if (matchTot) totalDescontos = parseCurrencyBR(matchTot[1]);
     }
-
     if (line.match(/(?:VALOR\s+)?L[ÍI]QUIDO(?:\s+A\s+RECEBER)?/i)) {
       const matchLiq = line.match(/(?:VALOR\s+)?L[ÍI]QUIDO(?:\s+A\s+RECEBER)?[:\s]*([\d\.\,]+)/i);
       if (matchLiq) valorLiquido = parseCurrencyBR(matchLiq[1]);
-    }
-
-    if (line.match(/SAL[ÁA]RIO\s+BASE[:\s]*([\d\.\,]+)/i)) {
-      const matchSal = line.match(/SAL[ÁA]RIO\s+BASE[:\s]*([\d\.\,]+)/i);
-      if (matchSal) salarioBase = parseCurrencyBR(matchSal[1]);
-    }
-
-    if (line.match(/BASE\s+(?:C[ÁA]LC(?:ULO)?\s+)?INSS[:\s]*([\d\.\,]+)/i)) {
-      const matchInss = line.match(/BASE\s+(?:C[ÁA]LC(?:ULO)?\s+)?INSS[:\s]*([\d\.\,]+)/i);
-      if (matchInss) baseInss = parseCurrencyBR(matchInss[1]);
-    }
-
-    if (line.match(/BASE\s+(?:C[ÁA]LC(?:ULO)?\s+)?FGTS[:\s]*([\d\.\,]+)/i)) {
-      const matchFgts = line.match(/BASE\s+(?:C[ÁA]LC(?:ULO)?\s+)?FGTS[:\s]*([\d\.\,]+)/i);
-      if (matchFgts) baseFgts = parseCurrencyBR(matchFgts[1]);
-    }
-
-    if (line.match(/FGTS\s+DO\s+M[EÊ]S[:\s]*([\d\.\,]+)/i)) {
-      const matchFgtsMes = line.match(/FGTS\s+DO\s+M[EÊ]S[:\s]*([\d\.\,]+)/i);
-      if (matchFgtsMes) fgtsMes = parseCurrencyBR(matchFgtsMes[1]);
-    }
-
-    if (line.match(/BASE\s+(?:C[ÁA]LC(?:ULO)?\s+)?IRRF[:\s]*([\d\.\,]+)/i)) {
-      const matchIrrf = line.match(/BASE\s+(?:C[ÁA]LC(?:ULO)?\s+)?IRRF[:\s]*([\d\.\,]+)/i);
-      if (matchIrrf) baseIrrf = parseCurrencyBR(matchIrrf[1]);
     }
   }
 
@@ -352,12 +456,10 @@ export function parseSingleContrachequeText(
     return null;
   }
 
-  // Se a matrícula não foi encontrada mas achou nome, tenta gerar ID ou pegar 6 primeiros dígitos
   if (!matricula && nome) {
-    matricula = `00${String(pageNumber || 1).padStart(4, '0')}`;
+    matricula = `10${String(pageNumber || 1).padStart(4, '0')}`;
   }
 
-  // Se período não foi achado, usa padrão Agosto/2026 ou Julho/2026
   if (!mesAno) {
     mesAno = '07-2026';
     periodo = '07/2026';
@@ -365,7 +467,7 @@ export function parseSingleContrachequeText(
     mes = 7;
   }
 
-  // Se os totais não foram extraídos textualmente, calcula através das rubricas
+  // Cálculo e reconciliação dos totais através das rubricas
   const sumProventos = rubricas.reduce((acc, r) => acc + r.provento, 0);
   const sumDescontos = rubricas.reduce((acc, r) => acc + r.desconto, 0);
 
@@ -379,11 +481,22 @@ export function parseSingleContrachequeText(
     valorLiquido = Math.max(0, totalProventos - totalDescontos);
   }
 
+  // Garante salário base se houver rubrica 001
+  if (!salarioBase) {
+    const rub001 = rubricas.find(r => r.codigo === '001');
+    if (rub001 && rub001.provento > 0) {
+      salarioBase = rub001.provento;
+    } else {
+      salarioBase = totalProventos;
+    }
+  }
+
+  // Document ID unificado no Firestore: `${matricula}_${mesAno}` (ex: "13974_07-2026")
   const docId = `${matricula}_${mesAno}`;
 
   return {
     id: docId,
-    matricula,
+    matricula, // "13974" (sem zero à esquerda)
     nome: nome || 'COLABORADOR COMARA',
     cargo: cargo || 'COLABORADOR DA CONSTRUÇÃO',
     sede: sede || 'KO-DL',
@@ -401,11 +514,11 @@ export function parseSingleContrachequeText(
     totalProventos,
     totalDescontos,
     valorLiquido,
-    salarioBase: salarioBase || (rubricas.find(r => r.codigo === '001')?.provento || 0),
+    salarioBase,
     baseInss: baseInss || totalProventos,
     baseFgts: baseFgts || totalProventos,
     fgtsMes: fgtsMes || (baseFgts ? baseFgts * 0.08 : totalProventos * 0.08),
-    baseIrrf: baseIrrf || Math.max(0, totalProventos - (baseInss * 0.14)),
+    baseIrrf: baseIrrf || Math.max(0, totalProventos - ((baseInss || totalProventos) * 0.14)),
     importadoEm: new Date().toISOString(),
     importadoPorEmail: currentUserEmail || 'coari.comara@gmail.com',
     observacoes: `Ficha Financeira Oficial extraída via Leitor PDF COMARA (Página ${pageNumber || 1})`
@@ -414,9 +527,11 @@ export function parseSingleContrachequeText(
 
 /**
  * Processa um arquivo PDF completo no navegador (podendo ter múltiplos contracheques concatenados)
+ * e compara com a lista existente de colaboradores para identificar servidores não cadastrados.
  */
 export async function parseComaraPdfContracheques(
   pdfArrayBuffer: ArrayBuffer,
+  existingEmployees: Employee[] = [],
   currentUserEmail?: string,
   onProgress?: (current: number, total: number) => void
 ): Promise<ParsePaystubResult> {
@@ -444,8 +559,30 @@ export async function parseComaraPdfContracheques(
         if (lines.length > 0) {
           const parsed = parseSingleContrachequeText(lines, currentUserEmail, pageNum);
           if (parsed && parsed.matricula) {
-            // Se já existir a mesma chave (ex: mesma matrícula no mesmo mês), mescla rubricas se necessário ou substitui
-            paystubsMap.set(parsed.id, parsed);
+            const existing = paystubsMap.get(parsed.id);
+            if (existing) {
+              // Se já existir a mesma matrícula no mesmo mês (página de continuação):
+              // Preserva rubricas mais completas e unifica
+              if (parsed.rubricas.length > 0) {
+                if (existing.rubricas.length === 0) {
+                  paystubsMap.set(parsed.id, parsed);
+                } else {
+                  // Adiciona rubricas que ainda não constem
+                  parsed.rubricas.forEach(r => {
+                    const hasRub = existing.rubricas.some(er => er.codigo === r.codigo && er.descricao === r.descricao);
+                    if (!hasRub) {
+                      existing.rubricas.push(r);
+                    }
+                  });
+                  existing.totalProventos = Math.max(existing.totalProventos, parsed.totalProventos);
+                  existing.totalDescontos = Math.max(existing.totalDescontos, parsed.totalDescontos);
+                  existing.valorLiquido = Math.max(existing.valorLiquido, parsed.valorLiquido);
+                  if (parsed.salarioBase && !existing.salarioBase) existing.salarioBase = parsed.salarioBase;
+                }
+              }
+            } else {
+              paystubsMap.set(parsed.id, parsed);
+            }
           }
         }
       } catch (pageErr: any) {
@@ -454,15 +591,216 @@ export async function parseComaraPdfContracheques(
     }
 
     const paystubs = Array.from(paystubsMap.values());
+
+    // Identifica servidores não cadastrados no banco de colaboradores
+    const existingMatriculasSet = new Set(
+      existingEmployees.map(e => normalizeMatricula(e.matricula))
+    );
+
+    const unregisteredMap = new Map<string, { matricula: string; nome: string; cargo: string; sede: string }>();
+
+    for (const p of paystubs) {
+      const normMat = normalizeMatricula(p.matricula);
+      if (!existingMatriculasSet.has(normMat) && !unregisteredMap.has(normMat)) {
+        unregisteredMap.set(normMat, {
+          matricula: normMat,
+          nome: p.nome,
+          cargo: p.cargo,
+          sede: p.sede || 'KO-DL'
+        });
+      }
+    }
+
+    const unregisteredEmployees = Array.from(unregisteredMap.values());
+
     return {
       paystubs,
       totalPages,
       totalExtracted: paystubs.length,
+      unregisteredEmployees,
       warnings
     };
   } catch (err: any) {
     throw new Error(`Falha ao ler o arquivo PDF: ${err.message || err}`);
   }
+}
+
+export interface MultiPdfProgress {
+  currentFileIndex: number;
+  totalFiles: number;
+  currentFileName: string;
+  currentPage: number;
+  totalPagesInFile: number;
+  totalPaystubsFoundSoFar: number;
+}
+
+export interface ParseMultipleResult extends ParsePaystubResult {
+  fileSummaries: {
+    fileName: string;
+    paystubsCount: number;
+    pages: number;
+    hasError?: boolean;
+    errorMessage?: string;
+  }[];
+}
+
+/**
+ * Processa um lote de múltiplos arquivos PDF de contracheques sequencialmente
+ * otimizando o uso de memória e evitando travamento do navegador.
+ */
+export async function parseMultipleComaraPdfs(
+  files: { name: string; arrayBuffer: ArrayBuffer }[],
+  existingEmployees: Employee[] = [],
+  currentUserEmail?: string,
+  onProgress?: (progress: MultiPdfProgress) => void
+): Promise<ParseMultipleResult> {
+  const warnings: string[] = [];
+  const paystubsMap = new Map<string, PaystubRecord>();
+  const fileSummaries: ParseMultipleResult['fileSummaries'] = [];
+  let totalPagesAcrossAll = 0;
+
+  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+    const fileItem = files[fileIdx];
+    const initialCountForThisFile = paystubsMap.size;
+    let filePages = 0;
+
+    try {
+      const loadingTask = pdfjsLib.getDocument({
+        data: fileItem.arrayBuffer,
+        useSystemFonts: true,
+      });
+
+      const pdfDoc = await loadingTask.promise;
+      filePages = pdfDoc.numPages;
+      totalPagesAcrossAll += filePages;
+
+      for (let pageNum = 1; pageNum <= filePages; pageNum++) {
+        if (onProgress) {
+          onProgress({
+            currentFileIndex: fileIdx + 1,
+            totalFiles: files.length,
+            currentFileName: fileItem.name,
+            currentPage: pageNum,
+            totalPagesInFile: filePages,
+            totalPaystubsFoundSoFar: paystubsMap.size
+          });
+        }
+
+        try {
+          const page = await pdfDoc.getPage(pageNum);
+          const lines = await extractLinesFromPdfPage(page);
+
+          if (lines.length > 0) {
+            const parsed = parseSingleContrachequeText(lines, currentUserEmail, pageNum);
+            if (parsed && parsed.matricula) {
+              const existing = paystubsMap.get(parsed.id);
+              if (existing) {
+                // Mescla rubricas e consolida dados mais detalhados
+                if (parsed.rubricas.length > 0) {
+                  if (existing.rubricas.length === 0) {
+                    paystubsMap.set(parsed.id, parsed);
+                  } else {
+                    parsed.rubricas.forEach(r => {
+                      const hasRub = existing.rubricas.some(er => er.codigo === r.codigo && er.descricao === r.descricao);
+                      if (!hasRub) {
+                        existing.rubricas.push(r);
+                      }
+                    });
+                    existing.totalProventos = Math.max(existing.totalProventos, parsed.totalProventos);
+                    existing.totalDescontos = Math.max(existing.totalDescontos, parsed.totalDescontos);
+                    existing.valorLiquido = Math.max(existing.valorLiquido, parsed.valorLiquido);
+                    if (parsed.salarioBase && !existing.salarioBase) existing.salarioBase = parsed.salarioBase;
+                  }
+                }
+              } else {
+                paystubsMap.set(parsed.id, parsed);
+              }
+            }
+          }
+        } catch (pageErr: any) {
+          warnings.push(`[${fileItem.name}] Erro na pág ${pageNum}: ${pageErr?.message || pageErr}`);
+        }
+      }
+
+      const extractedFromFile = paystubsMap.size - initialCountForThisFile;
+      fileSummaries.push({
+        fileName: fileItem.name,
+        paystubsCount: Math.max(0, extractedFromFile),
+        pages: filePages
+      });
+
+    } catch (fileErr: any) {
+      warnings.push(`Erro ao processar arquivo ${fileItem.name}: ${fileErr?.message || fileErr}`);
+      fileSummaries.push({
+        fileName: fileItem.name,
+        paystubsCount: 0,
+        pages: filePages,
+        hasError: true,
+        errorMessage: fileErr?.message || 'Falha ao ler PDF'
+      });
+    }
+  }
+
+  const paystubs = Array.from(paystubsMap.values());
+
+  // Identifica servidores não cadastrados no banco de colaboradores
+  const existingMatriculasSet = new Set(
+    existingEmployees.map(e => normalizeMatricula(e.matricula))
+  );
+
+  const unregisteredMap = new Map<string, { matricula: string; nome: string; cargo: string; sede: string }>();
+
+  for (const p of paystubs) {
+    const normMat = normalizeMatricula(p.matricula);
+    if (!existingMatriculasSet.has(normMat) && !unregisteredMap.has(normMat)) {
+      unregisteredMap.set(normMat, {
+        matricula: normMat,
+        nome: p.nome,
+        cargo: p.cargo,
+        sede: p.sede || 'KO-DL'
+      });
+    }
+  }
+
+  const unregisteredEmployees = Array.from(unregisteredMap.values());
+
+  return {
+    paystubs,
+    totalPages: totalPagesAcrossAll,
+    totalExtracted: paystubs.length,
+    unregisteredEmployees,
+    warnings,
+    fileSummaries
+  };
+}
+
+/**
+ * Cria novos objetos Employee a partir dos servidores não cadastrados encontrados no PDF
+ */
+export function buildEmployeesFromPaystubs(
+  unregistered: { matricula: string; nome: string; cargo: string; sede: string }[],
+  dataAdmissaoDefault: string = '2026-07-01'
+): Employee[] {
+  return unregistered.map((u) => {
+    const sedeMapeada: Branch = u.sede.includes('BE') ? 'BE' : u.sede.includes('MN') ? 'MN' : 'KO';
+    return {
+      id: u.matricula,
+      matricula: u.matricula,
+      nome: u.nome,
+      funcao: u.cargo || 'Mecânico de Manutenção',
+      cargo: u.cargo || 'Mecânico de Manutenção',
+      sede: sedeMapeada,
+      sede_origem: sedeMapeada,
+      sede_atual: sedeMapeada,
+      dataAdmissao: dataAdmissaoDefault,
+      status: 'Ativo',
+      saldoInicialHoras: 0,
+      primeiroAcesso: true,
+      senhaCadastrada: false,
+      criadoEm: new Date().toISOString(),
+      atualizadoEm: new Date().toISOString(),
+    };
+  });
 }
 
 /**
@@ -471,8 +809,44 @@ export async function parseComaraPdfContracheques(
 export function getDemoComaraPaystubs(): PaystubRecord[] {
   return [
     {
-      id: '013853_07-2026',
-      matricula: '013853',
+      id: '13974_07-2026',
+      matricula: '13974',
+      nome: 'OTNIEL DA ROCHA CABRAL',
+      cargo: 'MECANICO DE MANUTENCAO DE MAQUINAS DE CONSTRUCAO E',
+      sede: 'KO-DL',
+      periodo: '07/2026',
+      mesAno: '07-2026',
+      ano: 2026,
+      mes: 7,
+      dataInicio: '01/07/2026',
+      dataFim: '31/07/2026',
+      cpf: '***.394.429-**',
+      banco: '001 - BANCO DO BRASIL',
+      agencia: '2345-6',
+      conta: '13974-0',
+      rubricas: [
+        { codigo: '001', descricao: 'Salário Base', referencia: '', provento: 2830.38, desconto: 0, tipo: 'PROVENTO' },
+        { codigo: '060', descricao: 'Auxilio Transporte ATS JUL e AGO/26', referencia: '', provento: 560.53, desconto: 0, tipo: 'PROVENTO' },
+        { codigo: '600', descricao: 'Auxílio Alimentação', referencia: '', provento: 1192.00, desconto: 0, tipo: 'PROVENTO' },
+        { codigo: '722', descricao: 'Auxilio Alimentacao Atrasado JUL', referencia: '', provento: 1192.00, desconto: 0, tipo: 'PROVENTO' },
+        { codigo: '611', descricao: 'Desc. auxilio transporte', referencia: '', provento: 0, desconto: 124.54, tipo: 'DESCONTO' },
+        { codigo: '903', descricao: 'INSS Folha', referencia: '', provento: 0, desconto: 230.41, tipo: 'DESCONTO' },
+      ],
+      totalProventos: 5774.91,
+      totalDescontos: 354.95,
+      valorLiquido: 5419.96,
+      salarioBase: 2830.38,
+      baseInss: 2830.38,
+      baseFgts: 2830.38,
+      fgtsMes: 0.00,
+      baseIrrf: 2223.18,
+      importadoEm: new Date().toISOString(),
+      importadoPorEmail: 'coari.comara@gmail.com',
+      observacoes: 'Ficha Financeira Oficial COMARA - Extraída do Modelo de Folha (KO-DL)'
+    },
+    {
+      id: '13853_07-2026',
+      matricula: '13853',
       nome: 'CLESIO DE SOUZA FARO LOPES',
       cargo: 'OPERADOR DE MOTONIVEL',
       sede: 'KO-DL',
@@ -507,80 +881,7 @@ export function getDemoComaraPaystubs(): PaystubRecord[] {
       importadoEm: new Date().toISOString(),
       importadoPorEmail: 'coari.comara@gmail.com',
       observacoes: 'Ficha Financeira Oficial - COMARA Canteiro Coari (KO-DL)'
-    },
-    {
-      id: '014201_07-2026',
-      matricula: '014201',
-      nome: 'RAIMUNDO NONATO SILVA',
-      cargo: 'ELETRICISTA DE INSTALACO',
-      sede: 'KO-DL',
-      periodo: '07/2026',
-      mesAno: '07-2026',
-      ano: 2026,
-      mes: 7,
-      dataInicio: '01/07/2026',
-      dataFim: '31/07/2026',
-      cpf: '***.194.882-**',
-      banco: '104 - CAIXA ECONOMICA',
-      agencia: '0456',
-      conta: '10982-1',
-      rubricas: [
-        { codigo: '001', descricao: 'Salário Base', referencia: '30D', provento: 3450.00, desconto: 0, tipo: 'PROVENTO' },
-        { codigo: '032', descricao: 'Aux Transporte', referencia: '22D', provento: 240.00, desconto: 0, tipo: 'PROVENTO' },
-        { codigo: '600', descricao: 'Auxílio Alimentação', referencia: '22D', provento: 750.00, desconto: 0, tipo: 'PROVENTO' },
-        { codigo: '045', descricao: 'Insalubridade 20%', referencia: '20%', provento: 304.00, desconto: 0, tipo: 'PROVENTO' },
-        { codigo: '611', descricao: 'Desc. auxilio transporte', referencia: '6.00%', provento: 0, desconto: 207.00, tipo: 'DESCONTO' },
-        { codigo: '903', descricao: 'INSS Folha', referencia: '12.00%', provento: 0, desconto: 414.00, tipo: 'DESCONTO' },
-        { codigo: '904', descricao: 'IRRF Folha', referencia: '7.50%', provento: 0, desconto: 89.20, tipo: 'DESCONTO' },
-      ],
-      totalProventos: 4744.00,
-      totalDescontos: 710.20,
-      valorLiquido: 4033.80,
-      salarioBase: 3450.00,
-      baseInss: 3754.00,
-      baseFgts: 3754.00,
-      fgtsMes: 300.32,
-      baseIrrf: 3340.00,
-      importadoEm: new Date().toISOString(),
-      importadoPorEmail: 'coari.comara@gmail.com',
-      observacoes: 'Ficha Financeira Oficial - COMARA Canteiro Coari (KO-DL)'
-    },
-    {
-      id: '015099_07-2026',
-      matricula: '015099',
-      nome: 'JOAO BATISTA ALVES',
-      cargo: 'MOTORISTA DE CAMINHAO',
-      sede: 'KO-DL',
-      periodo: '07/2026',
-      mesAno: '07-2026',
-      ano: 2026,
-      mes: 7,
-      dataInicio: '01/07/2026',
-      dataFim: '31/07/2026',
-      cpf: '***.723.612-**',
-      banco: '001 - BANCO DO BRASIL',
-      agencia: '2345-6',
-      conta: '54321-0',
-      rubricas: [
-        { codigo: '001', descricao: 'Salário Base', referencia: '30D', provento: 3600.00, desconto: 0, tipo: 'PROVENTO' },
-        { codigo: '032', descricao: 'Aux Transporte', referencia: '22D', provento: 250.00, desconto: 0, tipo: 'PROVENTO' },
-        { codigo: '600', descricao: 'Auxílio Alimentação', referencia: '22D', provento: 750.00, desconto: 0, tipo: 'PROVENTO' },
-        { codigo: '010', descricao: 'Horas Extras 50%', referencia: '12:00', provento: 294.50, desconto: 0, tipo: 'PROVENTO' },
-        { codigo: '611', descricao: 'Desc. auxilio transporte', referencia: '6.00%', provento: 0, desconto: 216.00, tipo: 'DESCONTO' },
-        { codigo: '903', descricao: 'INSS Folha', referencia: '12.00%', provento: 0, desconto: 432.00, tipo: 'DESCONTO' },
-        { codigo: '904', descricao: 'IRRF Folha', referencia: '7.50%', provento: 0, desconto: 105.40, tipo: 'DESCONTO' },
-      ],
-      totalProventos: 4894.50,
-      totalDescontos: 753.40,
-      valorLiquido: 4141.10,
-      salarioBase: 3600.00,
-      baseInss: 3894.50,
-      baseFgts: 3894.50,
-      fgtsMes: 311.56,
-      baseIrrf: 3462.50,
-      importadoEm: new Date().toISOString(),
-      importadoPorEmail: 'coari.comara@gmail.com',
-      observacoes: 'Ficha Financeira Oficial - COMARA Canteiro Coari (KO-DL)'
     }
   ];
 }
+

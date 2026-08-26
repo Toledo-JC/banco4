@@ -158,18 +158,18 @@ export const LoginView: React.FC<LoginViewProps> = ({
           }`}>
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-400"></div>
 
-            {/* Header Text */}
+            {/* Header Text with Official COMARA Shield */}
             <div className="text-center space-y-2 mb-6">
-              <div className="w-12 h-12 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center mx-auto shadow-md">
-                <Lock className="w-6 h-6" />
+              <div className="flex justify-center mb-2">
+                <ComaraLogo size="xl" />
               </div>
-              <h1 className={`text-xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              <h1 className={`text-xl font-black tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
                 {authMode === 'LOGIN' && 'Acesso ao Painel RH'}
                 {authMode === 'CADASTRO' && 'Novo Cadastro de Administrador'}
                 {authMode === 'RESET' && 'Recuperar Senha de Acesso'}
               </h1>
               <p className={`text-xs ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
-                {authMode === 'LOGIN' && 'Autentique-se com sua conta Google Workspace ou e-mail'}
+                {authMode === 'LOGIN' && 'COMARA • Comissão de Aeroportos da Região Amazônica'}
                 {authMode === 'CADASTRO' && 'Crie sua credencial para gestão das bases KO, BE e MN'}
                 {authMode === 'RESET' && 'Informe seu e-mail para receber instruções de recuperação'}
               </p>
