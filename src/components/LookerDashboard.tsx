@@ -402,7 +402,7 @@ export const LookerDashboard: React.FC<LookerDashboardProps> = ({
           {onOpenSptfDispensa && (
             <button
               id="btn-dash-nova-dispensa-sptf"
-              onClick={onOpenSptfDispensa}
+              onClick={() => onOpenSptfDispensa && onOpenSptfDispensa()}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl text-white bg-emerald-600 hover:bg-emerald-500 shadow-sm transition-all cursor-pointer"
               title="Emitir Guia de Dispensa de SPTF (2 Vias A4)"
             >

@@ -656,7 +656,7 @@ export const ExecutiveReportsView: React.FC<ExecutiveReportsViewProps> = ({
           {onOpenSptfDispensa && (
             <button
               id="btn-report-nova-dispensa"
-              onClick={onOpenSptfDispensa}
+              onClick={() => onOpenSptfDispensa && onOpenSptfDispensa()}
               className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-md shadow-emerald-600/20 active:scale-98 cursor-pointer"
               title="Emitir nova Guia de Dispensa de SPTF com 2 vias e débito em banco de horas"
             >

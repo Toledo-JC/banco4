@@ -3,6 +3,7 @@ import { AdminUser, AdminRole } from '../types';
 import { storageService } from '../services/storageService';
 import { firestoreService } from '../services/firestoreService';
 import { hashPassword } from '../services/authService';
+import { ROLE_INFO, rbacService } from '../services/rbacService';
 import { auth } from '../services/firebase';
 import { InfoTooltip } from './InfoTooltip';
 import { 
@@ -49,6 +50,7 @@ export const AdminPermissionsManagement: React.FC<AdminPermissionsManagementProp
   const [nome, setNome] = useState('');
   const [cargo, setCargo] = useState('Analista de RH');
   const [nivelAcesso, setNivelAcesso] = useState<AdminRole>('AUX_DA');
+  const [sede, setSede] = useState('KO');
   const [senhaInicial, setSenhaInicial] = useState('');
   const [confirmarSenha, setConfirmarSenha] = useState('');
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
@@ -94,6 +96,7 @@ export const AdminPermissionsManagement: React.FC<AdminPermissionsManagementProp
     setNome('');
     setCargo('Analista de RH');
     setNivelAcesso('GESTOR_RH');
+    setSede('KO');
     setSenhaInicial('');
     setConfirmarSenha('');
     setErrorMsg(null);
@@ -111,7 +114,8 @@ export const AdminPermissionsManagement: React.FC<AdminPermissionsManagementProp
     setEmail(adm.email);
     setNome(adm.nome);
     setCargo(adm.cargo || 'Gestor RH');
-    setNivelAcesso(adm.nivelAcesso || 'GESTOR_RH');
+    setNivelAcesso(adm.nivelAcesso || adm.role || 'GESTOR_RH');
+    setSede(adm.sede || adm.canteiroCodigo || 'KO');
     setSenhaInicial('');
     setConfirmarSenha('');
     setErrorMsg(null);
@@ -161,6 +165,8 @@ export const AdminPermissionsManagement: React.FC<AdminPermissionsManagementProp
       cargo: cargo.trim() || 'Gestor RH',
       nivelAcesso,
       role: nivelAcesso,
+      sede: rbacService.hasGlobalAccess(nivelAcesso) ? 'TODAS' : sede,
+      canteiroCodigo: rbacService.hasGlobalAccess(nivelAcesso) ? 'TODAS' : sede,
       ativo: editingAdmin ? editingAdmin.ativo : true,
       criadoEm: editingAdmin?.criadoEm || new Date().toISOString().replace('T', ' ').substring(0, 19),
     };
@@ -319,6 +325,7 @@ export const AdminPermissionsManagement: React.FC<AdminPermissionsManagementProp
                 <th className="py-3 px-5">Administrador</th>
                 <th className="py-3 px-5">E-mail Corporativo</th>
                 <th className="py-3 px-5">Cargo / Função</th>
+                <th className="py-3 px-5 text-center">Canteiro / Sede</th>
                 <th className="py-3 px-5 text-center">Nível de Acesso</th>
                 <th className="py-3 px-5 text-center">Status</th>
                 <th className="py-3 px-5 text-right">Cadastrado em</th>
@@ -330,13 +337,17 @@ export const AdminPermissionsManagement: React.FC<AdminPermissionsManagementProp
             }`}>
               {admins.map((adm) => {
                 const isSelf = adm.email.toLowerCase() === currentUserEmail.toLowerCase();
+                const roleKey = (adm.nivelAcesso || adm.role || 'AUX_DA') as AdminRole;
+                const roleMeta = ROLE_INFO[roleKey] || ROLE_INFO.AUX_DA;
+                const canteiroDisplay = rbacService.hasGlobalAccess(roleKey) ? 'TODAS (Global)' : (adm.sede || adm.canteiroCodigo || 'KO');
+
                 return (
                   <tr key={adm.id} className={`transition-colors ${isDark ? 'hover:bg-[#1C1F26]' : 'hover:bg-slate-50/80'}`}>
                     {/* Nome */}
                     <td className="py-3.5 px-5 font-sans">
                       <div className="flex items-center gap-2.5">
                         <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs border ${
-                          adm.nivelAcesso === 'SUPER_ADMIN'
+                          rbacService.hasGlobalAccess(roleKey)
                             ? isDark ? 'bg-purple-950/60 text-purple-300 border-purple-800/40' : 'bg-purple-100 text-purple-700 border-purple-300'
                             : isDark ? 'bg-blue-950/60 text-blue-300 border-blue-800/40' : 'bg-blue-100 text-blue-700 border-blue-300'
                         }`}>
@@ -363,22 +374,21 @@ export const AdminPermissionsManagement: React.FC<AdminPermissionsManagementProp
                       <span className={isDark ? 'text-[#8E9299]' : 'text-slate-600'}>{adm.cargo}</span>
                     </td>
 
+                    {/* Canteiro / Sede */}
+                    <td className="py-3.5 px-5 text-center whitespace-nowrap">
+                      <span className={`px-2 py-0.5 rounded-md text-[11px] font-mono font-bold border ${
+                        canteiroDisplay.includes('Global')
+                          ? isDark ? 'bg-indigo-950/40 text-indigo-300 border-indigo-800/40' : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                          : isDark ? 'bg-blue-950/40 text-blue-300 border-blue-800/40' : 'bg-blue-50 text-blue-700 border-blue-200'
+                      }`}>
+                        {canteiroDisplay}
+                      </span>
+                    </td>
+
                     {/* Nível de Acesso */}
                     <td className="py-3.5 px-5 text-center whitespace-nowrap">
-                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
-                        adm.nivelAcesso === 'SUPER_ADMIN'
-                          ? isDark ? 'bg-purple-950/40 text-purple-300 border-purple-800/50' : 'bg-purple-50 text-purple-700 border-purple-200'
-                          : adm.nivelAcesso === 'GESTOR_RH'
-                          ? isDark ? 'bg-blue-950/40 text-blue-300 border-blue-800/50' : 'bg-blue-50 text-blue-700 border-blue-200'
-                          : adm.nivelAcesso === 'AUX_DA'
-                          ? isDark ? 'bg-teal-950/40 text-teal-300 border-teal-800/50' : 'bg-teal-50 text-teal-700 border-teal-200'
-                          : adm.nivelAcesso === 'CHEFE_CANTEIRO'
-                          ? isDark ? 'bg-amber-950/40 text-amber-300 border-amber-800/50' : 'bg-amber-50 text-amber-700 border-amber-200'
-                          : adm.nivelAcesso === 'GERENTE_CAMPO' || adm.nivelAcesso === 'ROLE_GERENTE'
-                          ? isDark ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/50' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : isDark ? 'bg-slate-950/40 text-slate-300 border-slate-800/50' : 'bg-slate-50 text-slate-700 border-slate-200'
-                      }`}>
-                        {adm.nivelAcesso === 'AUX_DA' ? 'AUX_DA (Aux. DA)' : adm.nivelAcesso}
+                      <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${roleMeta.badgeColor || 'bg-slate-500/20 text-slate-300 border-slate-500/30'}`}>
+                        {roleMeta.label || adm.nivelAcesso}
                       </span>
                     </td>
 
@@ -561,11 +571,11 @@ export const AdminPermissionsManagement: React.FC<AdminPermissionsManagementProp
                 <div>
                   <div className="flex items-center gap-1.5 mb-1">
                     <label className={`block font-semibold text-xs ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
-                      Nível de Acesso (Role)
+                      Nível de Acesso (Role) *
                     </label>
                     <InfoTooltip 
                       theme={theme}
-                      content="Perfis RBAC: AUX_DA (Auxiliar da DA), GESTOR_RH (Gestão Completa de Banco de Horas), CHEFE_CANTEIRO (Consulta Mobile de Canteiro), GERENTE_CAMPO (Visualização Geral), SUPER_ADMIN (Acesso Total com Gestão de Usuários), AUDITOR (Relatórios)."
+                      content="SUPER_ADMIN / RH_ADMIN (Acesso Total Global); GERENTE_CANTEIRO / CHEFE_CANTEIRO / ENCARREGADO / CHEFE_DA / AUX_DA (Restrito ao Canteiro Ativo)."
                     />
                   </div>
                   <select
@@ -577,14 +587,49 @@ export const AdminPermissionsManagement: React.FC<AdminPermissionsManagementProp
                         : 'bg-white border-slate-300 text-slate-900 focus:border-blue-500'
                     }`}
                   >
-                    <option value="AUX_DA">AUX_DA (Auxiliar da Divisão Administrativa)</option>
-                    <option value="GESTOR_RH">GESTOR_RH (Lançar, Editar e Homologar)</option>
-                    <option value="CHEFE_CANTEIRO">CHEFE_CANTEIRO (Visão Mobile de Consulta Rápida)</option>
-                    <option value="GERENTE_CAMPO">GERENTE_CAMPO (Consulta Rápida / Somente Leitura)</option>
-                    <option value="SUPER_ADMIN">SUPER_ADMIN (Acesso Total / Gestão de RH)</option>
-                    <option value="AUDITOR">AUDITOR (Visualização e Relatórios)</option>
+                    <option value="SUPER_ADMIN">SUPER_ADMIN (TI - Acesso Total Global)</option>
+                    <option value="RH_ADMIN">RH_ADMIN (RH Sede - Gestão Global & Folha)</option>
+                    <option value="GESTOR_RH">GESTOR_RH (RH Sede - Banco de Horas)</option>
+                    <option value="GERENTE_CANTEIRO">GERENTE_CANTEIRO (Gerente do Canteiro Ativo)</option>
+                    <option value="CHEFE_CANTEIRO">CHEFE_CANTEIRO (Operacional - Lançamentos & Dispensas)</option>
+                    <option value="ENCARREGADO_CANTEIRO">ENCARREGADO_CANTEIRO (Operacional de Campo)</option>
+                    <option value="CHEFE_DA">CHEFE_DA (Gestão Administrativa do Canteiro)</option>
+                    <option value="ENCARREGADO_DA">ENCARREGADO_DA (Gestão Administrativa de Campo)</option>
+                    <option value="AUX_DA">AUX_DA (Auxiliar de Campo - Lançamentos & Dispensas)</option>
+                    <option value="AUDITOR">AUDITOR (Auditoria e Relatórios - Somente Leitura)</option>
                   </select>
                 </div>
+              </div>
+
+              {/* Seção Canteiro / Sede Vinculada */}
+              <div>
+                <label className={`block font-semibold text-xs mb-1 ${isDark ? 'text-[#8E9299]' : 'text-slate-700'}`}>
+                  Canteiro de Obras / Sede Vinculada {rbacService.hasGlobalAccess(nivelAcesso) ? '(Acesso Global)' : '*'}
+                </label>
+                <select
+                  value={rbacService.hasGlobalAccess(nivelAcesso) ? 'TODAS' : sede}
+                  disabled={rbacService.hasGlobalAccess(nivelAcesso)}
+                  onChange={(e) => setSede(e.target.value)}
+                  className={`w-full px-3 py-2 rounded-lg text-xs border focus:outline-hidden font-semibold ${
+                    rbacService.hasGlobalAccess(nivelAcesso) ? 'opacity-60 cursor-not-allowed' : ''
+                  } ${
+                    isDark 
+                      ? 'bg-[#0D0F14] border-[#1F2229] text-[#E0E2E5] focus:border-blue-500' 
+                      : 'bg-white border-slate-300 text-slate-900 focus:border-blue-500'
+                  }`}
+                >
+                  {rbacService.hasGlobalAccess(nivelAcesso) ? (
+                    <option value="TODAS">TODAS AS SEDES E CANTEIROS (Acesso Irrestrito)</option>
+                  ) : (
+                    <>
+                      <option value="KO">KO - Canteiro de Obras Coari (DECO-KO)</option>
+                      <option value="BE">BE - Sede Belém / Destacamento de Apoio</option>
+                      <option value="MN">MN - Destacamento de Manaus (BAMN)</option>
+                      <option value="SP">SP - Destacamento São Paulo</option>
+                      <option value="RJ">RJ - Destacamento Rio de Janeiro</option>
+                    </>
+                  )}
+                </select>
               </div>
 
               {/* Senha Inicial e Confirmação */}

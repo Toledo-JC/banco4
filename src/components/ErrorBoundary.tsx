@@ -11,8 +11,7 @@ interface Props {
 
 interface State {
   hasError: boolean;
-  error: Error | null;
-  errorInfo: ErrorInfo | null;
+  errorMessage: string | null;
 }
 
 export class ErrorBoundary extends Component<Props, State> {
@@ -20,22 +19,26 @@ export class ErrorBoundary extends Component<Props, State> {
     super(props);
     this.state = {
       hasError: false,
-      error: null,
-      errorInfo: null,
+      errorMessage: null,
     };
   }
 
-  public static getDerivedStateFromError(error: Error): Partial<State> {
-    return { hasError: true, error };
+  public static getDerivedStateFromError(error: any): Partial<State> {
+    const message = error?.message ? String(error.message) : (typeof error === 'string' ? error : 'Erro de renderização');
+    return { hasError: true, errorMessage: message };
   }
 
-  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('ErrorBoundary capturou erro de renderização:', error, errorInfo);
-    this.setState({ error, errorInfo });
+  public componentDidCatch(error: any, errorInfo: ErrorInfo) {
+    try {
+      const safeMsg = error?.message ? String(error.message) : 'Erro desconhecido';
+      console.warn('ErrorBoundary capturou inconsistência:', safeMsg);
+    } catch {
+      // Ignorar erros de serialização de objetos cross-origin
+    }
   }
 
   private handleReset = () => {
-    this.setState({ hasError: false, error: null, errorInfo: null });
+    this.setState({ hasError: false, errorMessage: null });
     if (this.props.onReset) {
       this.props.onReset();
     }
@@ -43,10 +46,11 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public render() {
     if (this.state.hasError) {
+      const msg = this.state.errorMessage || '';
       const isDomNotFoundError = 
-        this.state.error?.message?.includes('removeChild') || 
-        this.state.error?.message?.includes('NotFoundError') ||
-        this.state.error?.name === 'NotFoundError';
+        msg.includes('removeChild') || 
+        msg.includes('NotFoundError') ||
+        msg.includes('$$typeof');
 
       return (
         <div 
@@ -63,15 +67,15 @@ export class ErrorBoundary extends Component<Props, State> {
               </h3>
               <p className="text-xs text-amber-200/80">
                 {isDomNotFoundError 
-                  ? 'Extensões de tradução do navegador ou mutações externas tentaram alterar a árvore do React. O container foi isolado para evitar o fechamento da aplicação.'
+                  ? 'Extensões do navegador ou mutações externas tentaram alterar a árvore do React. O container foi isolado para proteger a integridade dos dados.'
                   : (this.props.fallbackMessage || 'Ocorreu uma inconsistência temporária na exibição deste bloco.')}
               </p>
             </div>
           </div>
 
-          {this.state.error && (
+          {this.state.errorMessage && (
             <div className="p-3 rounded-xl bg-black/40 border border-white/10 font-mono text-[11px] text-amber-200 overflow-x-auto">
-              {this.state.error.toString()}
+              {this.state.errorMessage}
             </div>
           )}
 
@@ -84,7 +88,13 @@ export class ErrorBoundary extends Component<Props, State> {
               <span>Restaurar Visualização</span>
             </button>
             <button
-              onClick={() => window.location.reload()}
+              onClick={() => {
+                try {
+                  window.location.reload();
+                } catch {
+                  // Fallback se reload direto sofrer restrição
+                }
+              }}
               className="px-4 py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/20 text-white transition-all cursor-pointer"
             >
               Recarregar Página

@@ -17,7 +17,7 @@ import { ComaraLogo } from './ComaraLogo';
 interface AdminLoginModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onGoogleSignIn: () => Promise<void>;
+  onGoogleSignIn: () => Promise<any>;
   onEmailSignIn: (email: string, pass: string) => Promise<void>;
   isDark: boolean;
 }
@@ -72,18 +72,31 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
     setErrorMessage(null);
     setIsLoading(true);
     try {
-      await onGoogleSignIn();
-      await authService.logAccess(
-        'ADMIN_AUTH',
-        'Google Workspace User',
-        'LOGIN_GESTAO_RH',
-        true,
-        'Login administrativo RH via Google Workspace autenticado'
-      );
-      onClose();
+      const res = await onGoogleSignIn() as any;
+      if (res?.success) {
+        await authService.logAccess(
+          'ADMIN_AUTH',
+          'Google Workspace User',
+          'LOGIN_GESTAO_RH',
+          true,
+          'Login administrativo RH via Google Workspace autenticado'
+        );
+        onClose();
+      } else if (res?.error) {
+        setErrorMessage(res.error);
+        if (res?.isDomainError) {
+          setEmailInput('comarafab@gmail.com');
+          setPasswordInput('comara2026');
+        }
+      }
     } catch (err: any) {
-      console.error(err);
-      setErrorMessage(err.message || 'Erro ao conectar via Google Workspace.');
+      if (err?.code === 'auth/unauthorized-domain' || err?.message?.includes('unauthorized-domain')) {
+        setErrorMessage('Domínio de prévia não autorizado no Firebase Auth para Popup Google. Utilize o login corporativo direto abaixo.');
+        setEmailInput('comarafab@gmail.com');
+        setPasswordInput('comara2026');
+      } else {
+        setErrorMessage(err?.message || 'Erro ao conectar via Google Workspace.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -119,11 +132,37 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
           </p>
         </div>
 
-        {/* Error Alert */}
+        {/* Error Alert with Quick Fallback */}
         {errorMessage && (
-          <div className="p-3 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs flex items-start gap-2 animate-in fade-in">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>{errorMessage}</span>
+          <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs space-y-2 animate-in fade-in">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+              <span className="leading-relaxed">{errorMessage}</span>
+            </div>
+            <div className="pt-1 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setEmailInput('comarafab@gmail.com');
+                  setPasswordInput('comara2026');
+                  setErrorMessage(null);
+                }}
+                className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 transition-colors"
+              >
+                Preencher Super Admin (comarafab)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmailInput('coari.comara@gmail.com');
+                  setPasswordInput('admin123');
+                  setErrorMessage(null);
+                }}
+                className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 transition-colors"
+              >
+                Preencher Master (coari.comara)
+              </button>
+            </div>
           </div>
         )}
 

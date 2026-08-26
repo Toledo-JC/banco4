@@ -38,9 +38,31 @@ import { useIdleTimer } from './hooks/useIdleTimer';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { CheckCircle2, AlertCircle, Cloud, RefreshCw, X, Database } from 'lucide-react';
 
+export interface AppUser {
+  uid?: string;
+  email: string;
+  nome: string;
+  displayName?: string | null;
+  role: AdminRole;
+  cargo?: string;
+  loginTime?: string;
+  photoURL?: string | null;
+  tratamentoTitulo?: string;
+}
+
 export default function App() {
   // Auth State
-  const [currentUser, setCurrentUser] = useState<FirebaseUser | AuthSession | null>(() => authService.getCurrentSession());
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
+    const saved = authService.getCurrentSession();
+    if (!saved) return null;
+    return {
+      email: saved.email,
+      nome: saved.nome,
+      role: (saved.role as AdminRole) || 'SUPER_ADMIN',
+      cargo: saved.cargo,
+      loginTime: saved.loginTime,
+    };
+  });
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [userRole, setUserRole] = useState<AdminRole>(() => {
     const session = authService.getCurrentSession();
@@ -306,23 +328,43 @@ export default function App() {
         const email = user.email?.toLowerCase().trim() || '';
 
         // Master super admin bypass
-        const isMaster = email === 'coari.comara@gmail.com' || email.endsWith('@comara.aer.mil.br');
+        const isMaster = email === 'coari.comara@gmail.com' || email === 'comarafab@gmail.com' || email.endsWith('@comara.aer.mil.br');
         
         // Find user in Firestore admin_users collection
         const matchAdmin = adminUsers.find(a => a.email.toLowerCase().trim() === email);
 
         if (isMaster) {
-          setCurrentUser(user);
+          const appUser: AppUser = {
+            uid: user.uid,
+            email,
+            nome: user.displayName || 'Super Administrador COMARA',
+            displayName: user.displayName,
+            role: 'SUPER_ADMIN',
+            cargo: 'Super Administrador',
+            loginTime: new Date().toISOString(),
+            photoURL: user.photoURL,
+          };
+          setCurrentUser(appUser);
           setUserRole('SUPER_ADMIN');
           setUserMode('ADMIN');
           authService.saveCurrentSession({
             email,
-            nome: user.displayName || 'Super Administrador',
+            nome: user.displayName || 'Super Administrador COMARA',
             role: 'SUPER_ADMIN',
             loginTime: new Date().toISOString(),
           });
         } else if (matchAdmin && matchAdmin.ativo) {
-          setCurrentUser(user);
+          const appUser: AppUser = {
+            uid: user.uid,
+            email,
+            nome: matchAdmin.nome,
+            displayName: user.displayName,
+            role: matchAdmin.nivelAcesso,
+            cargo: matchAdmin.cargo,
+            loginTime: new Date().toISOString(),
+            photoURL: user.photoURL,
+          };
+          setCurrentUser(appUser);
           setUserRole(matchAdmin.nivelAcesso);
           setUserMode(matchAdmin.nivelAcesso === 'AUDITOR' ? 'COLABORADOR' : 'ADMIN');
           authService.saveCurrentSession({
@@ -341,7 +383,16 @@ export default function App() {
           showToast('Acesso Negado: Usuário não cadastrado pela equipe de RH.', 'error');
         } else {
           // If admin list still syncing, set provisionally
-          setCurrentUser(user);
+          const appUser: AppUser = {
+            uid: user.uid,
+            email,
+            nome: user.displayName || 'Gestor RH',
+            displayName: user.displayName,
+            role: 'GESTOR_RH',
+            loginTime: new Date().toISOString(),
+            photoURL: user.photoURL,
+          };
+          setCurrentUser(appUser);
           setUserRole('GESTOR_RH');
           setUserMode('ADMIN');
         }
@@ -349,8 +400,15 @@ export default function App() {
         // Sem Firebase Auth Google - verificar se há sessão salva de login Firestore
         const savedSession = authService.getCurrentSession();
         if (savedSession) {
-          setCurrentUser(savedSession);
-          setUserRole(savedSession.role);
+          const appUser: AppUser = {
+            email: savedSession.email,
+            nome: savedSession.nome,
+            role: (savedSession.role as AdminRole) || 'SUPER_ADMIN',
+            cargo: savedSession.cargo,
+            loginTime: savedSession.loginTime,
+          };
+          setCurrentUser(appUser);
+          setUserRole(savedSession.role as AdminRole);
           setUserMode(savedSession.role === 'AUDITOR' ? 'COLABORADOR' : 'ADMIN');
         } else {
           setCurrentUser(null);
@@ -369,7 +427,7 @@ export default function App() {
       const res = await signInWithPopup(auth, googleProvider);
       const email = res.user?.email?.toLowerCase().trim() || '';
       
-      const isMaster = email === 'coari.comara@gmail.com' || email.endsWith('@comara.aer.mil.br');
+      const isMaster = email === 'coari.comara@gmail.com' || email === 'comarafab@gmail.com' || email.endsWith('@comara.aer.mil.br');
       const matchAdmin = adminUsers.find(a => a.email.toLowerCase().trim() === email && a.ativo);
 
       if (!isMaster && !matchAdmin && adminUsers.length > 0) {
@@ -378,9 +436,24 @@ export default function App() {
         throw new Error('Acesso Negado: Usuário não cadastrado pela equipe de RH.');
       }
       setFirestoreErrorNotice(null);
+      showToast(`Bem-vindo, ${res.user?.displayName || 'Gestor'}!`, 'success');
+      return { success: true, user: res.user };
     } catch (err: any) {
-      console.error('Erro no login Google:', err);
-      showToast(err?.message || 'Falha ao autenticar com Google.', 'error');
+      if (err?.code === 'auth/unauthorized-domain' || err?.message?.includes('unauthorized-domain')) {
+        const errorMsg = 'Domínio de prévia não autorizado no Firebase Auth para Popup Google. Utilize o login direto corporativo abaixo.';
+        // Don't log as an uncaught runtime error, return informative failure
+        return { 
+          success: false, 
+          isDomainError: true, 
+          error: errorMsg 
+        };
+      } else if (err?.code === 'auth/popup-closed-by-user') {
+        return { success: false, error: 'Janela de login fechada pelo usuário.' };
+      } else {
+        console.warn('Tentativa de login Google:', err?.message || err);
+        showToast(err?.message || 'Falha ao autenticar com Google.', 'error');
+        return { success: false, error: err?.message || 'Falha ao autenticar com Google.' };
+      }
     }
   };
 
@@ -392,7 +465,14 @@ export default function App() {
       throw new Error(result.message);
     }
 
-    setCurrentUser(result.session);
+    const appUser: AppUser = {
+      email: result.session.email,
+      nome: result.session.nome,
+      role: (result.session.role as AdminRole) || 'SUPER_ADMIN',
+      cargo: result.session.cargo,
+      loginTime: result.session.loginTime,
+    };
+    setCurrentUser(appUser);
     setUserRole(result.session.role);
     setUserMode(result.session.role === 'AUDITOR' ? 'COLABORADOR' : 'ADMIN');
     setFirestoreErrorNotice(null);
@@ -702,14 +782,16 @@ export default function App() {
     }
   };
 
-  const handleOpenNewEntry = (matricula?: string, defaultDate?: string) => {
+  const handleOpenNewEntry = (matricula?: string | any, defaultDate?: string | any) => {
     if (userRole === 'AUDITOR' || userMode === 'COLABORADOR') {
       showToast('Ação bloqueada: Seu nível de acesso não permite inclusão manual de lançamentos.', 'error');
       return;
     }
+    const safeMat = typeof matricula === 'string' ? matricula : (employees[0]?.matricula || '');
+    const safeDate = typeof defaultDate === 'string' ? defaultDate : undefined;
     setDailyEntryInitialRecord(null);
-    setDailyEntryPreselectedMatricula(matricula || (employees[0]?.matricula || ''));
-    setDailyEntryPreselectedDate(defaultDate);
+    setDailyEntryPreselectedMatricula(safeMat);
+    setDailyEntryPreselectedDate(safeDate);
     setIsDailyEntryModalOpen(true);
   };
 
@@ -718,9 +800,10 @@ export default function App() {
       showToast('Ação bloqueada: Seu nível de acesso não permite alteração de lançamentos.', 'error');
       return;
     }
+    if (!record || typeof record !== 'object' || typeof record.id !== 'string') return;
     setDailyEntryInitialRecord(record);
-    setDailyEntryPreselectedMatricula(record.matricula);
-    setDailyEntryPreselectedDate(record.dataRegistro || record.data_ocorrencia);
+    setDailyEntryPreselectedMatricula(typeof record.matricula === 'string' ? record.matricula : '');
+    setDailyEntryPreselectedDate(typeof record.dataRegistro === 'string' ? record.dataRegistro : record.data_ocorrencia);
     setIsDailyEntryModalOpen(true);
   };
 
@@ -729,6 +812,7 @@ export default function App() {
       showToast('Ação bloqueada: Seu nível de acesso não permite exclusão de lançamentos.', 'error');
       return;
     }
+    if (typeof id !== 'string') return;
     try {
       await firestoreService.deleteTimeRecord(id);
       storageService.deleteTimeRecord(id);
@@ -743,12 +827,13 @@ export default function App() {
   };
 
   // Handlers para Guia de Dispensa de SPTF (Compensação em Banco de Horas)
-  const handleOpenSptfDispensa = (matricula?: string) => {
+  const handleOpenSptfDispensa = (matricula?: string | any) => {
     if (userRole === 'AUDITOR' || userMode === 'COLABORADOR') {
       showToast('Ação bloqueada: Seu nível de acesso não permite emissão de dispensas de SPTF.', 'error');
       return;
     }
-    setSptfDispensaPreselectedMatricula(matricula);
+    const safeMat = typeof matricula === 'string' ? matricula : undefined;
+    setSptfDispensaPreselectedMatricula(safeMat);
     setIsSptfDispensaModalOpen(true);
   };
 
@@ -1042,7 +1127,7 @@ export default function App() {
             records={records}
             insalubrityRecords={insalubrityRecords}
             paystubs={paystubs}
-            onOpenAdminLogin={() => setIsAdminLoginModalOpen(false || true)}
+            onOpenAdminLogin={() => setIsAdminLoginModalOpen(true)}
             theme={theme}
             onToggleTheme={handleToggleTheme}
             onViewAttachment={handleViewAttachment}
@@ -1220,7 +1305,7 @@ export default function App() {
         onSelectTab={setActiveTab}
         onOpenNewEntry={() => handleOpenNewEntry()}
         onOpenQuickBatchModal={handleOpenQuickBatchModal}
-        onOpenSptfDispensa={handleOpenSptfDispensa}
+        onOpenSptfDispensa={() => handleOpenSptfDispensa()}
         onResetData={handleTriggerLoadMocksSafety}
         onClearData={handleTriggerClearDataSafety}
         onOpenImportRecordsModal={() => setIsImportRecordsModalOpen(true)}
@@ -1243,14 +1328,14 @@ export default function App() {
             <LookerDashboard
               employees={employees}
               records={records}
-              onOpenNewEntryModal={handleOpenNewEntry}
-              onOpenEditEntryModal={handleOpenEditEntry}
-              onDeleteRecord={handleDeleteRecord}
-              onViewEmployeeStatement={handleViewStatement}
+              onOpenNewEntryModal={(mat) => handleOpenNewEntry(mat)}
+              onOpenEditEntryModal={(rec) => handleOpenEditEntry(rec)}
+              onDeleteRecord={(id) => handleDeleteRecord(id)}
+              onViewEmployeeStatement={(mat) => handleViewStatement(mat)}
               onViewAttachment={handleViewAttachment}
               onOpenImportRecordsModal={() => setIsImportRecordsModalOpen(true)}
               onOpenQuickBatchModal={() => setIsQuickBatchModalOpen(true)}
-              onOpenSptfDispensa={handleOpenSptfDispensa}
+              onOpenSptfDispensa={() => handleOpenSptfDispensa()}
               onNavigateToEmployees={() => setActiveTab('colaboradores')}
               onResetData={handleTriggerLoadMocksSafety}
               onClearData={handleTriggerClearDataSafety}
@@ -1264,7 +1349,7 @@ export default function App() {
               employees={employees}
               records={records}
               onUpdateEmployees={handleUpdateEmployees}
-              onViewStatement={handleViewStatement}
+              onViewStatement={(mat) => handleViewStatement(mat)}
               onQuickNewEntry={(mat) => handleOpenNewEntry(mat)}
               theme={theme}
             />
@@ -1311,7 +1396,7 @@ export default function App() {
               userRole={userRole}
               onSaveInsalubrityBatch={handleSaveInsalubrityBatch}
               onNavigateToInsalubrity={() => setActiveTab('insalubridade')}
-              onOpenSptfDispensa={handleOpenSptfDispensa}
+              onOpenSptfDispensa={() => handleOpenSptfDispensa()}
               theme={theme}
             />
           )}
@@ -1325,9 +1410,9 @@ export default function App() {
               onSelectMatricula={setSelectedMatricula}
               onBack={() => setActiveTab('dashboard')}
               onOpenNewEntry={(mat) => handleOpenNewEntry(mat)}
-              onOpenSptfDispensa={handleOpenSptfDispensa}
-              onOpenEditEntry={handleOpenEditEntry}
-              onDeleteRecord={handleDeleteRecord}
+              onOpenSptfDispensa={(mat) => handleOpenSptfDispensa(mat)}
+              onOpenEditEntry={(rec) => handleOpenEditEntry(rec)}
+              onDeleteRecord={(id) => handleDeleteRecord(id)}
               onViewAttachment={handleViewAttachment}
               theme={theme}
             />

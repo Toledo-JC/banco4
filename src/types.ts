@@ -30,16 +30,18 @@ export interface LiquidationLink {
 
 export type AdminRole = 
   | 'SUPER_ADMIN' 
+  | 'RH_ADMIN'
   | 'GESTOR_RH' 
-  | 'AUX_DA' 
-  | 'AUDITOR' 
+  | 'GERENTE_CANTEIRO'
+  | 'GERENTE' 
+  | 'ROLE_GERENTE' 
+  | 'GERENTE_CAMPO'
   | 'CHEFE_CANTEIRO' 
   | 'ENCARREGADO_CANTEIRO' 
   | 'CHEFE_DA' 
   | 'ENCARREGADO_DA' 
-  | 'GERENTE' 
-  | 'ROLE_GERENTE' 
-  | 'GERENTE_CAMPO';
+  | 'AUX_DA' 
+  | 'AUDITOR';
 
 export type CanteiroRole = 
   | 'GERENTE' 
@@ -152,6 +154,10 @@ export interface AuthSession {
   role: AdminRole;
   cargo?: string;
   loginTime: string;
+  sede?: string;
+  canteiroCodigo?: string;
+  canteiroId?: string;
+  tratamentoTitulo?: TratamentoTitulo;
 }
 
 export interface Employee {

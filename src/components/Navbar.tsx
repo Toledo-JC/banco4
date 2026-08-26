@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { SystemConfig, AdminRole } from '../types';
 import { ComaraLogo } from './ComaraLogo';
+import { rbacService, ROLE_INFO } from '../services/rbacService';
 import { 
   BarChart3, 
   Plus, 
@@ -82,7 +83,16 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const isDark = theme === 'dark';
   const isAdmin = userMode === 'ADMIN';
-  const isAuxDA = userRole === 'AUX_DA' || (userRole as string) === 'AUXILIAR_DA';
+  const currentRole = (userRole || 'SUPER_ADMIN') as AdminRole;
+  const roleMeta = ROLE_INFO[currentRole] || ROLE_INFO.AUX_DA;
+
+  const canManageAdmins = rbacService.canManageAdmins(currentRole);
+  const canManageSystem = rbacService.canManageSystemConfig(currentRole);
+  const canImportFolha = rbacService.canImportFolha(currentRole);
+  const canManageCanteiros = rbacService.canManageCanteiros(currentRole);
+  const canLaunchHours = rbacService.canLaunchHours(currentRole);
+  const canLaunchInsalubrity = rbacService.canLaunchInsalubrity(currentRole);
+  const canIssueDispensa = rbacService.canIssueDispensa(currentRole);
 
   // Dropdown states
   const [isLaunchDropdownOpen, setIsLaunchDropdownOpen] = useState(false);
@@ -444,7 +454,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   </div>
 
                   {/* 1. Canteiros de Obras */}
-                  {!isAuxDA && (
+                  {canManageCanteiros && (
                     <button
                       onClick={() => {
                         onSelectTab('canteiros');
@@ -491,8 +501,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </div>
                   </button>
 
-                  {/* 3. Configurações do Sistema (Logo & Modo Insalubridade) - Apenas Administradores */}
-                  {!isAuxDA && onOpenLogoModal && (
+                  {/* 3. Configurações do Sistema (Logo & Modo Insalubridade) */}
+                  {canManageSystem && onOpenLogoModal && (
                     <button
                       onClick={() => {
                         onOpenLogoModal();
@@ -514,8 +524,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </button>
                   )}
 
-                  {/* 4. Gestão de Acessos & Permissões - Apenas Administradores */}
-                  {!isAuxDA && (
+                  {/* 4. Gestão de Acessos & Permissões - Apenas Administradores com permissão */}
+                  {canManageAdmins && (
                     <button
                       onClick={() => {
                         onSelectTab('permissoes_admin');
@@ -532,7 +542,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       </div>
                       <div className="flex-1">
                         <div className="font-semibold flex items-center justify-between">
-                          <span>Gestão de Acessos</span>
+                          <span>Gestão de Acessos (RBAC)</span>
                           {!isAdmin && <Lock className="w-3 h-3 text-amber-400" />}
                         </div>
                         <span className={`text-[10px] block ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
@@ -542,10 +552,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </button>
                   )}
 
-                  {!isAuxDA && <div className={`my-1 border-t ${isDark ? 'border-[#1F2229]' : 'border-slate-100'}`} />}
+                  {(canImportFolha || canManageSystem) && <div className={`my-1 border-t ${isDark ? 'border-[#1F2229]' : 'border-slate-100'}`} />}
 
                   {/* 5. Importar Lançamentos (CSV) */}
-                  {!isAuxDA && (
+                  {canImportFolha && (
                     <button
                       onClick={() => {
                         onOpenImportRecordsModal();
@@ -568,7 +578,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   )}
 
                   {/* 6. Gerenciar/Importar Colaboradores */}
-                  {!isAuxDA && (
+                  {canImportFolha && (
                     <button
                       onClick={() => {
                         onSelectTab('colaboradores');
@@ -590,7 +600,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     </button>
                   )}
 
-                  {!isAuxDA && (
+                  {canManageSystem && (
                     <>
                       <div className={`my-1 border-t ${isDark ? 'border-[#1F2229]' : 'border-slate-100'}`} />
 
@@ -679,31 +689,24 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className={`px-4 py-3 border-b ${isDark ? 'border-[#1F2229]' : 'border-slate-100'}`}>
                     <div className="flex items-center gap-2.5">
                       <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm text-white ${
-                        isAuxDA 
-                          ? 'bg-cyan-600' 
-                          : userRole === 'SUPER_ADMIN' 
+                        currentRole === 'SUPER_ADMIN' 
+                          ? 'bg-purple-600' 
+                          : currentRole === 'RH_ADMIN' || currentRole === 'GESTOR_RH'
                             ? 'bg-indigo-600' 
-                            : userRole === 'GESTOR_RH' 
-                              ? 'bg-purple-600' 
-                              : 'bg-amber-600'
+                            : currentRole === 'GERENTE_CANTEIRO'
+                              ? 'bg-blue-600'
+                              : currentRole.includes('CHEFE')
+                                ? 'bg-amber-600'
+                                : currentRole.includes('ENCARREGADO')
+                                  ? 'bg-emerald-600'
+                                  : 'bg-cyan-600'
                       }`}>
-                        {isAuxDA ? 'DA' : userRole === 'SUPER_ADMIN' ? 'SA' : userRole === 'GESTOR_RH' ? 'RH' : 'AU'}
+                        {currentRole === 'SUPER_ADMIN' ? 'TI' : currentRole === 'RH_ADMIN' || currentRole === 'GESTOR_RH' ? 'RH' : currentRole === 'AUX_DA' ? 'DA' : 'OP'}
                       </div>
                       <div className="overflow-hidden">
                         <div className="flex items-center gap-1.5">
                           <span className={`font-bold text-xs truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                            {isAuxDA ? 'Auxiliar de DA' : userRole === 'SUPER_ADMIN' ? 'Super Admin' : userRole === 'GESTOR_RH' ? 'Gestor RH' : 'Auditor'}
-                          </span>
-                          <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono font-bold border ${
-                            isAuxDA
-                              ? isDark ? 'bg-cyan-950/40 text-cyan-300 border-cyan-800/40' : 'bg-cyan-50 text-cyan-700 border-cyan-200'
-                              : userRole === 'SUPER_ADMIN' 
-                                ? isDark ? 'bg-indigo-950/40 text-indigo-300 border-indigo-800/40' : 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                                : userRole === 'GESTOR_RH'
-                                ? isDark ? 'bg-purple-950/40 text-purple-300 border-purple-800/40' : 'bg-purple-50 text-purple-700 border-purple-200'
-                                : isDark ? 'bg-amber-950/40 text-amber-300 border-amber-800/40' : 'bg-amber-50 text-amber-700 border-amber-200'
-                          }`}>
-                            {userRole}
+                            {roleMeta.label}
                           </span>
                         </div>
                         <p className={`text-[10px] font-mono truncate mt-0.5 ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>

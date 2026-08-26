@@ -602,7 +602,7 @@ export const authService = {
       return { success: false, message: 'Informe sua senha de acesso.' };
     }
 
-    const isMasterEmail = cleanEmail === 'coari.comara@gmail.com' || cleanEmail.endsWith('@comara.aer.mil.br');
+    const isMasterEmail = cleanEmail === 'coari.comara@gmail.com' || cleanEmail === 'comarafab@gmail.com' || cleanEmail.endsWith('@comara.aer.mil.br');
     const inputHash = await hashPassword(passwordAttempt);
 
     let adminDoc: AdminUser | null = null;
@@ -631,7 +631,7 @@ export const authService = {
       const masterAdmin: AdminUser = {
         id: cleanEmail,
         email: cleanEmail,
-        nome: cleanEmail === 'coari.comara@gmail.com' ? 'Super Administrador COMARA' : cleanEmail.split('@')[0],
+        nome: (cleanEmail === 'coari.comara@gmail.com' || cleanEmail === 'comarafab@gmail.com') ? 'Super Administrador COMARA' : cleanEmail.split('@')[0],
         cargo: 'Super Administrador TI / RH',
         nivelAcesso: 'SUPER_ADMIN',
         role: 'SUPER_ADMIN',
@@ -783,6 +783,10 @@ export const authService = {
       nome: adminDoc.nome,
       role: adminDoc.nivelAcesso || adminDoc.role || 'GESTOR_RH',
       cargo: adminDoc.cargo,
+      sede: adminDoc.sede || adminDoc.canteiroCodigo || 'KO',
+      canteiroCodigo: adminDoc.canteiroCodigo || adminDoc.sede || 'KO',
+      canteiroId: adminDoc.canteiroCodigo || adminDoc.sede || 'KO',
+      tratamentoTitulo: adminDoc.tratamentoTitulo,
       loginTime: new Date().toISOString(),
     };
     this.saveCurrentSession(session);

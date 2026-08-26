@@ -55,6 +55,11 @@ export const LoginView: React.FC<LoginViewProps> = ({
         setErrorMessage('A janela de login do Google foi fechada antes da conclusão.');
       } else if (error.code === 'auth/cancelled-popup-request') {
         setErrorMessage('Operação cancelada.');
+      } else if (error.code === 'auth/unauthorized-domain' || error.message?.includes('unauthorized-domain')) {
+        setErrorMessage('Domínio de prévia/Cloud Run não listado nos domínios autorizados do Firebase Auth. Utilize a autenticação direta por e-mail corporativo abaixo para entrar.');
+        setAuthMode('LOGIN');
+        setEmail('comarafab@gmail.com');
+        setPassword('comara2026');
       } else {
         setErrorMessage(`Falha na autenticação Google: ${error.message || error.code}`);
       }

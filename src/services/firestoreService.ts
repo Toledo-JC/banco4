@@ -9,6 +9,7 @@ import {
   writeBatch, 
   onSnapshot, 
   query, 
+  where,
   orderBy,
   Unsubscribe 
 } from 'firebase/firestore';
@@ -174,11 +175,16 @@ export const firestoreService = {
 
   subscribeEmployees(
     onSuccess: (employees: Employee[]) => void,
-    onError?: (error: Error) => void
+    onError?: (error: Error) => void,
+    canteiroId?: string
   ): Unsubscribe {
     const path = COLLECTIONS.COLABORADORES;
     try {
-      const q = query(collection(db, path), orderBy('nome', 'asc'));
+      let q = query(collection(db, path), orderBy('nome', 'asc'));
+      if (canteiroId && canteiroId !== 'TODAS' && canteiroId !== 'TODOS') {
+        // Query com filtro no Firestore quando aplicável
+        q = query(collection(db, path), where('sede', '==', canteiroId), orderBy('nome', 'asc'));
+      }
       return onSnapshot(
         q,
         (snapshot) => {
@@ -186,13 +192,25 @@ export const firestoreService = {
             const list: Employee[] = [];
             snapshot.forEach((docSnap) => {
               const data = docSnap.data();
+              const empSede = data.sede || data.sede_atual || 'KO';
+              
+              // Filtro defensivo de segurança no cliente
+              if (canteiroId && canteiroId !== 'TODAS' && canteiroId !== 'TODOS') {
+                const normalizedCanteiro = canteiroId.toUpperCase();
+                const match = (data.sede || '').toUpperCase() === normalizedCanteiro ||
+                              (data.sede_atual || '').toUpperCase() === normalizedCanteiro ||
+                              (data.sede_origem || '').toUpperCase() === normalizedCanteiro ||
+                              (data.canteiroId || '').toUpperCase() === normalizedCanteiro;
+                if (!match) return;
+              }
+
               list.push({
                 id: docSnap.id,
                 matricula: data.matricula || docSnap.id,
                 nome: data.nome || '',
                 funcao: data.funcao || data.cargo || 'Técnico de Manutenção',
                 cargo: data.cargo || data.funcao,
-                sede: data.sede || 'KO',
+                sede: empSede,
                 sede_origem: data.sede_origem || data.sede || 'KO',
                 sede_atual: data.sede_atual || data.sede || 'KO',
                 dataAdmissao: data.dataAdmissao || '2026-01-01',
@@ -234,7 +252,8 @@ export const firestoreService = {
 
   subscribeTimeRecords(
     onSuccess: (records: TimeRecord[]) => void,
-    onError?: (error: Error) => void
+    onError?: (error: Error) => void,
+    canteiroId?: string
   ): Unsubscribe {
     const path = COLLECTIONS.LANCAMENTOS;
     try {
@@ -243,8 +262,20 @@ export const firestoreService = {
         (snapshot) => {
           try {
             const list: TimeRecord[] = [];
+            const normalizedCanteiro = (canteiroId && canteiroId !== 'TODAS' && canteiroId !== 'TODOS') ? canteiroId.toUpperCase() : null;
+
             snapshot.forEach((docSnap) => {
               const data = docSnap.data();
+
+              // Filtro de canteiro se restrito
+              if (normalizedCanteiro) {
+                const recSede = (data.employeeSede || data.sede || data.secaoCanteiro || '').toUpperCase();
+                const recCanteiro = (data.canteiroId || '').toUpperCase();
+                if (recSede && !recSede.includes(normalizedCanteiro) && recCanteiro !== normalizedCanteiro) {
+                  return;
+                }
+              }
+
               const rawDate = data.dataRegistro || data.data_ocorrencia || data.data || data.date || (data.criadoEm ? data.criadoEm.split('T')[0] : '');
               const horasBrutas = typeof data.horasBrutas === 'number' ? data.horasBrutas : (Number(data.horasBrutas) || 0);
               const multiplicador = typeof data.multiplicador === 'number' ? data.multiplicador : (Number(data.multiplicador) || 1);
@@ -691,7 +722,8 @@ export const firestoreService = {
 
   subscribeInsalubrityRecords(
     onSuccess: (records: InsalubrityRecord[]) => void,
-    onError?: (error: Error) => void
+    onError?: (error: Error) => void,
+    canteiroId?: string
   ): Unsubscribe {
     const path = COLLECTIONS.INSALUBRIDADE;
     try {
@@ -701,8 +733,15 @@ export const firestoreService = {
         (snapshot) => {
           try {
             const list: InsalubrityRecord[] = [];
+            const normalizedCanteiro = (canteiroId && canteiroId !== 'TODAS' && canteiroId !== 'TODOS') ? canteiroId.toUpperCase() : null;
+
             snapshot.forEach((docSnap) => {
               const data = docSnap.data();
+              const recSede = (data.sede || 'KO').toUpperCase();
+              if (normalizedCanteiro && recSede !== normalizedCanteiro) {
+                return;
+              }
+
               list.push({
                 id: docSnap.id,
                 matricula: data.matricula || '',
@@ -1129,7 +1168,8 @@ export const firestoreService = {
 
   subscribeDispensasSptf(
     onSuccess: (dispensas: DispensaSptfRecord[]) => void,
-    onError?: (error: Error) => void
+    onError?: (error: Error) => void,
+    canteiroId?: string
   ): Unsubscribe {
     const path = COLLECTIONS.DISPENSAS_SPTF;
     try {
@@ -1138,8 +1178,18 @@ export const firestoreService = {
         (snapshot) => {
           try {
             const list: DispensaSptfRecord[] = [];
+            const normalizedCanteiro = (canteiroId && canteiroId !== 'TODAS' && canteiroId !== 'TODOS') ? canteiroId.toUpperCase() : null;
+
             snapshot.forEach((docSnap) => {
               const data = docSnap.data();
+              if (normalizedCanteiro) {
+                const secao = (data.secaoCanteiro || '').toUpperCase();
+                const canteiro = (data.canteiroId || '').toUpperCase();
+                if (!secao.includes(normalizedCanteiro) && canteiro !== normalizedCanteiro) {
+                  return;
+                }
+              }
+
               list.push({
                 id: docSnap.id,
                 numeroGuia: data.numeroGuia || '',
