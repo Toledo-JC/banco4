@@ -293,8 +293,30 @@ export const EmployeePortal: React.FC<EmployeePortalProps> = ({
         </div>
       </div>
 
+      {/* Cabeçalho Institucional Oficial COMARA (Visível na Impressão e Tela) */}
+      <div className="bg-[#15171C] border border-[#1F2229] p-4 sm:p-5 rounded-2xl flex items-center justify-between gap-4 print:border-b-2 print:border-slate-300 print:shadow-none print:rounded-none print:p-2 print:bg-white print:text-black">
+        <div className="flex items-center gap-3.5">
+          <ComaraLogo size="lg" />
+          <div>
+            <div className="text-[10px] sm:text-[11px] font-mono font-bold uppercase tracking-widest text-blue-400 print:text-blue-900">
+              COMANDO DA AERONÁUTICA • COMISSÃO DE AEROPORTOS DA REGIÃO AMAZÔNICA
+            </div>
+            <h1 className="text-sm sm:text-base font-black tracking-tight text-white print:text-black">
+              PORTAL DO COLABORADOR • EXTRATO OFICIAL DE HORAS
+            </h1>
+            <p className="text-xs text-[#8E9299] print:text-slate-600">
+              Documento expedido em: {new Date().toLocaleDateString('pt-BR')} às {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+            </p>
+          </div>
+        </div>
+        <div className="hidden sm:block text-right text-[10px] font-mono text-[#8E9299] print:text-slate-700">
+          <div className="font-bold text-white print:text-black">COMARA • SPTF</div>
+          <div>Consulta de Efetivo</div>
+        </div>
+      </div>
+
       {/* Header do Perfil do Colaborador */}
-      <div className="bg-[#15171C] border border-[#1F2229] rounded-2xl p-6 relative overflow-hidden shadow-xl">
+      <div className="bg-[#15171C] border border-[#1F2229] rounded-2xl p-6 relative overflow-hidden shadow-xl print:border print:border-slate-300 print:bg-white print:text-black print:rounded-none">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="flex items-center gap-4 sm:gap-5">
             {/* Foto / Avatar */}

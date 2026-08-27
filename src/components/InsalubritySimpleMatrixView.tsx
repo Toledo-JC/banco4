@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Employee, InsalubrityRecord, ConstructionSite, AdminRole } from '../types';
+import { ComaraLogo } from './ComaraLogo';
+import { getSignaturesForCanteiro } from '../services/canteiroService';
 import { 
   FileSpreadsheet, 
   Calendar, 
@@ -1555,23 +1557,26 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
 
             {/* Documento Formatado para Impressão */}
             <div className="overflow-y-auto flex-1 font-sans text-xs p-2 space-y-4">
-              {/* Cabeçalho Oficial da COMARA */}
-              <div className="text-center border-b pb-3 space-y-1">
-                <div className="text-[10px] font-bold uppercase tracking-widest text-gray-700">
-                  COMANDO DA AERONÁUTICA • DEPARTAMENTO DE ESPAÇO AÉREO
+              {/* Cabeçalho Oficial da COMARA com Logo e Dados Institucionais */}
+              <div className="border-b pb-3 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <ComaraLogo size="print" theme="light" />
+                  <div className="text-left space-y-0.5">
+                    <div className="text-[9px] font-bold uppercase tracking-widest text-gray-700">
+                      COMANDO DA AERONÁUTICA • DEPARTAMENTO DE CONTROLE DO ESPAÇO AÉREO
+                    </div>
+                    <div className="text-xs sm:text-sm font-black tracking-tight text-gray-900 uppercase">
+                      COMISSÃO DE AEROPORTOS DA REGIÃO AMAZÔNICA — COMARA
+                    </div>
+                    <div className="text-xs font-bold text-blue-900 uppercase">
+                      PLANILHA DE EFETIVO EM CAMPO & ATIVIDADES — {currentPeriodLabel.toUpperCase()}
+                    </div>
+                  </div>
                 </div>
-                <div className="text-sm font-black tracking-tight text-gray-900 uppercase">
-                  COMISSÃO DE AEROPORTOS DA REGIÃO AMAZÔNICA — COMARA
-                </div>
-                <div className="text-xs font-bold text-gray-800 uppercase">
-                  PLANILHA DE EFETIVO EM CAMPO — {currentPeriodLabel.toUpperCase()}
-                </div>
-                <div className="text-[11px] font-mono text-gray-600 flex items-center justify-center gap-4 pt-1">
-                  <span>MÊS/ANO: <strong>{MONTH_NAMES[selectedMonth].toUpperCase()} / {selectedYear}</strong></span>
-                  <span>•</span>
-                  <span>CANTEIRO/SEDE: <strong>{selectedBranch}</strong></span>
-                  <span>•</span>
-                  <span>EMISSÃO: <strong>{new Date().toLocaleDateString('pt-BR')}</strong></span>
+                <div className="text-right text-[10px] font-mono text-gray-600 space-y-0.5 shrink-0">
+                  <div>MÊS/ANO: <strong>{MONTH_NAMES[selectedMonth].toUpperCase()} / {selectedYear}</strong></div>
+                  <div>CANTEIRO/SEDE: <strong>{selectedBranch}</strong></div>
+                  <div>EMISSÃO: <strong>{new Date().toLocaleDateString('pt-BR')}</strong></div>
                 </div>
               </div>
 
@@ -1623,29 +1628,38 @@ export const InsalubritySimpleMatrixView: React.FC<InsalubritySimpleMatrixViewPr
                 </tbody>
               </table>
 
-              {/* Blocos de Assinatura */}
-              <div className="pt-8 grid grid-cols-3 gap-8 text-center text-[10px]">
-                <div className="space-y-1">
-                  <div className="border-t border-gray-800 pt-1 font-bold">
-                    ENCARREGADO DE CANTEIRO
-                  </div>
-                  <div className="text-gray-500 text-[9px]">Apontamento e Conferência de Campo</div>
-                </div>
+              {/* Blocos de Assinatura Oficiais COMARA */}
+              {(() => {
+                const branchCode = selectedBranch === 'TODAS' ? 'KO' : selectedBranch;
+                const sigs = getSignaturesForCanteiro(branchCode, constructionSites);
+                return (
+                  <div className="pt-8 grid grid-cols-3 gap-8 text-center text-[10px] print-avoid-break">
+                    <div className="space-y-1">
+                      <div className="border-t border-gray-800 pt-1 font-bold">
+                        {sigs.assinatura1.titulo}
+                      </div>
+                      <div className="font-semibold text-gray-900 text-[10px]">{sigs.assinatura1.nome}</div>
+                      <div className="text-gray-500 text-[9px]">{sigs.assinatura1.subtitulo}</div>
+                    </div>
 
-                <div className="space-y-1">
-                  <div className="border-t border-gray-800 pt-1 font-bold">
-                    ENGENHEIRO RESIDENTE / FISCAL
-                  </div>
-                  <div className="text-gray-500 text-[9px]">Aprovação Técnica de Execução</div>
-                </div>
+                    <div className="space-y-1">
+                      <div className="border-t border-gray-800 pt-1 font-bold">
+                        {sigs.assinatura2.titulo}
+                      </div>
+                      <div className="font-semibold text-gray-900 text-[10px]">{sigs.assinatura2.nome}</div>
+                      <div className="text-gray-500 text-[9px]">{sigs.assinatura2.subtitulo}</div>
+                    </div>
 
-                <div className="space-y-1">
-                  <div className="border-t border-gray-800 pt-1 font-bold">
-                    DIVISÃO DE RECURSOS HUMANOS
+                    <div className="space-y-1">
+                      <div className="border-t border-gray-800 pt-1 font-bold">
+                        {sigs.assinatura3.titulo}
+                      </div>
+                      <div className="font-semibold text-gray-900 text-[10px]">{sigs.assinatura3.nome}</div>
+                      <div className="text-gray-500 text-[9px]">{sigs.assinatura3.subtitulo}</div>
+                    </div>
                   </div>
-                  <div className="text-gray-500 text-[9px]">Processamento em Folha de Pagamento</div>
-                </div>
-              </div>
+                );
+              })()}
             </div>
           </div>
         </div>

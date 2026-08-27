@@ -35,7 +35,7 @@ import {
   FileText
 } from 'lucide-react';
 
-export type ActiveTab = 'dashboard' | 'colaboradores' | 'canteiros' | 'insalubridade' | 'contracheques' | 'relatorios' | 'extrato' | 'portal_colaborador' | 'permissoes_admin' | 'arquitetura';
+export type ActiveTab = 'dashboard' | 'colaboradores' | 'canteiros' | 'insalubridade' | 'contracheques' | 'relatorios' | 'extrato' | 'portal_colaborador' | 'permissoes_admin' | 'auditoria' | 'arquitetura';
 export type UserMode = 'ADMIN' | 'COLABORADOR';
 
 interface NavbarProps {
@@ -91,6 +91,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const canManageSystem = rbacService.canManageSystemConfig(currentRole);
   const canImportFolha = rbacService.canImportFolha(currentRole);
   const canManageCanteiros = rbacService.canManageCanteiros(currentRole);
+  const canViewAuditLogs = rbacService.canViewAuditLogs(currentRole);
   const canLaunchHours = rbacService.canLaunchHours(currentRole);
   const canLaunchInsalubrity = rbacService.canLaunchInsalubrity(currentRole);
   const canIssueDispensa = rbacService.canIssueDispensa(currentRole);
@@ -548,6 +549,36 @@ export const Navbar: React.FC<NavbarProps> = ({
                         </div>
                         <span className={`text-[10px] block ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
                           Controle de permissões e administradores
+                        </span>
+                      </div>
+                    </button>
+                  )}
+
+                  {/* 5. Auditoria & Logs de Segurança - Exclusivo Super Admin / RH Admin */}
+                  {canViewAuditLogs && (
+                    <button
+                      onClick={() => {
+                        onSelectTab('auditoria');
+                        setIsSettingsOpen(false);
+                      }}
+                      className={`w-full px-3.5 py-2.5 text-xs text-left flex items-center gap-2.5 transition-colors cursor-pointer ${
+                        activeTab === 'auditoria'
+                          ? isDark ? 'bg-indigo-950/30 text-indigo-300' : 'bg-indigo-50 text-indigo-800'
+                          : isDark ? 'hover:bg-[#1F2229] text-[#E0E2E5]' : 'hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <div className="w-6 h-6 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center shrink-0 border border-indigo-500/20">
+                        <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
+                      </div>
+                      <div className="flex-1">
+                        <div className="font-semibold flex items-center justify-between">
+                          <span>Trilha de Auditoria & Logs</span>
+                          <span className="text-[9px] px-1.5 py-0.2 rounded font-bold bg-indigo-500/20 text-indigo-300">
+                            LGPD
+                          </span>
+                        </div>
+                        <span className={`text-[10px] block ${isDark ? 'text-[#8E9299]' : 'text-slate-500'}`}>
+                          Logs imutáveis de segurança e operações
                         </span>
                       </div>
                     </button>

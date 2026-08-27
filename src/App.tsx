@@ -31,9 +31,13 @@ import { InsalubrityManagement } from './components/InsalubrityManagement';
 import { CanteirosManagement } from './components/CanteirosManagement';
 import { ExecutiveReportsView } from './components/ExecutiveReportsView';
 import { ContrachequesManagement } from './components/ContrachequesManagement';
+import { AuditTrailView } from './components/AuditTrailView';
 import { ComaraLogoModal } from './components/ComaraLogoModal';
 import { DatabaseSafetyActionModal, SafetyActionType } from './components/DatabaseSafetyActionModal';
 import { SessionTimeoutModal } from './components/SessionTimeoutModal';
+import { ProtectedRoute } from './components/ProtectedRoute';
+import { rbacService } from './services/rbacService';
+import { registrarLogAuditoria } from './services/auditService';
 import { useIdleTimer } from './hooks/useIdleTimer';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { CheckCircle2, AlertCircle, Cloud, RefreshCw, X, Database } from 'lucide-react';
@@ -45,6 +49,9 @@ export interface AppUser {
   displayName?: string | null;
   role: AdminRole;
   cargo?: string;
+  sede?: string;
+  canteiroCodigo?: string;
+  canteiroId?: string;
   loginTime?: string;
   photoURL?: string | null;
   tratamentoTitulo?: string;
@@ -130,11 +137,17 @@ export default function App() {
   }, []);
 
   // -------------------------------------------------------------
-  // 1. Real-Time Cloud Firestore Sync com Fallback Robusto
+  // 1. Real-Time Cloud Firestore Sync com Fallback Robusto & Tenancy
   // -------------------------------------------------------------
   const initFirestoreSubscriptions = useCallback(() => {
     setIsSyncing(true);
     testFirestoreConnection();
+
+    // Determine strict active canteiro for non-global users
+    const isGlobal = rbacService.isGlobalRole(userRole);
+    const activeCanteiro = (!isGlobal && currentUser)
+      ? rbacService.getUserCanteiroId(currentUser)
+      : undefined;
 
     // Subscribe to Employees in Firestore
     const unsubEmployees = firestoreService.subscribeEmployees(
@@ -160,7 +173,8 @@ export default function App() {
           setSelectedMatricula(local[0].matricula);
         }
         setIsSyncing(false);
-      }
+      },
+      activeCanteiro
     );
 
     // Subscribe to Time Records in Firestore
@@ -179,7 +193,8 @@ export default function App() {
         }
         const local = storageService.getTimeRecords();
         setRecords(local);
-      }
+      },
+      activeCanteiro
     );
 
     // Subscribe to Authorized Admin Users in Firestore
@@ -213,7 +228,8 @@ export default function App() {
         console.warn('Fallback local para insalubridade:', err);
         const local = storageService.getInsalubrityRecords();
         setInsalubrityRecords(local);
-      }
+      },
+      activeCanteiro
     );
 
     // Subscribe to Construction Sites in Firestore
@@ -248,7 +264,8 @@ export default function App() {
       },
       (err) => {
         console.warn('Fallback para contracheques:', err);
-      }
+      },
+      activeCanteiro
     );
 
     // Subscribe to Dispensas de SPTF in Firestore
@@ -263,7 +280,8 @@ export default function App() {
         console.warn('Fallback local para dispensas SPTF:', err);
         const local = storageService.getDispensasSptf();
         setDispensasSptf(local);
-      }
+      },
+      activeCanteiro
     );
 
     return () => {
@@ -308,7 +326,7 @@ export default function App() {
         console.warn('Erro ao cancelar listener de dispensas SPTF:', e);
       }
     };
-  }, [selectedMatricula]);
+  }, [selectedMatricula, userRole, currentUser]);
 
   useEffect(() => {
     const cleanup = initFirestoreSubscriptions();
@@ -561,9 +579,28 @@ export default function App() {
 
   // Firestore Write: Salvar Lançamento Individual
   const handleSaveRecord = async (newRecord: TimeRecord) => {
+    const isEdit = records.some(r => r.id === newRecord.id);
     try {
       await firestoreService.saveTimeRecord(newRecord, currentUser?.email || 'admin@rh.cloud');
       showToast(`Lançamento de ${newRecord.horasBrutas}h gravado no Cloud Firestore com sucesso!`, 'success');
+
+      // Audit Trail
+      registrarLogAuditoria({
+        usuarioId: currentUser?.email || currentUserEmail || 'sistema@comara.aer.mil.br',
+        usuarioNome: (currentUser as any)?.nome || (currentUser as any)?.displayName || currentUserEmail || 'Operador',
+        usuarioPerfil: userRole,
+        canteiroId: newRecord.employeeSede || currentUser?.canteiroCodigo || 'TODOS',
+        tipoAcao: isEdit ? 'EDICAO_LANCAMENTO' : 'LANCAMENTO_HORAS',
+        detalhes: `${isEdit ? 'Edição' : 'Lançamento manual'} para Matrícula ${newRecord.matricula} (${newRecord.employeeName || ''}): ${newRecord.tipoOcorrencia} de ${newRecord.horasBrutas}h (Saldo: ${newRecord.saldoCalculado >= 0 ? '+' : ''}${newRecord.saldoCalculado}h) em ${newRecord.dataRegistro}.`,
+        recursoId: newRecord.id,
+        detalhesJson: {
+          matricula: newRecord.matricula,
+          tipoOcorrencia: newRecord.tipoOcorrencia,
+          horasBrutas: newRecord.horasBrutas,
+          saldoCalculado: newRecord.saldoCalculado,
+          dataRegistro: newRecord.dataRegistro,
+        }
+      });
     } catch (error: any) {
       console.error('Erro ao salvar no Firestore, usando fallback local:', error);
       if (isPermissionError(error)) {
@@ -607,6 +644,17 @@ export default function App() {
       );
 
       setBatchProgress(null);
+
+      // Audit Trail
+      registrarLogAuditoria({
+        usuarioId: currentUser?.email || currentUserEmail || 'sistema@comara.aer.mil.br',
+        usuarioNome: (currentUser as any)?.nome || (currentUser as any)?.displayName || currentUserEmail || 'Operador',
+        usuarioPerfil: userRole,
+        canteiroId: currentUser?.canteiroCodigo || 'TODOS',
+        tipoAcao: 'LANCAMENTO_HORAS',
+        detalhes: `Importação em lote de ${importedRecords.length.toLocaleString('pt-BR')} lançamentos de banco de horas sincronizados no Firestore.`,
+        detalhesJson: { totalRegistros: importedRecords.length }
+      });
 
       if (res.errors.length > 0) {
         showToast(`${res.count} de ${total} lançamentos sincronizados com alguns alertas.`, 'info');
@@ -657,6 +705,17 @@ export default function App() {
       );
 
       setBatchProgress(null);
+
+      // Audit Trail
+      registrarLogAuditoria({
+        usuarioId: currentUser?.email || currentUserEmail || 'sistema@comara.aer.mil.br',
+        usuarioNome: (currentUser as any)?.nome || (currentUser as any)?.displayName || currentUserEmail || 'Operador',
+        usuarioPerfil: userRole,
+        canteiroId: currentUser?.canteiroCodigo || 'TODOS',
+        tipoAcao: 'ALTERACAO_FUNCAO',
+        detalhes: `Importação/Atualização cadastral em lote de ${newEmployees.length.toLocaleString('pt-BR')} colaboradores no sistema.`,
+        detalhesJson: { totalColaboradores: newEmployees.length }
+      });
 
       if (newEmployees.length > 0 && !selectedMatricula) {
         setSelectedMatricula(newEmployees[0].matricula);
@@ -813,11 +872,23 @@ export default function App() {
       return;
     }
     if (typeof id !== 'string') return;
+    const targetRec = records.find(r => r.id === id);
     try {
       await firestoreService.deleteTimeRecord(id);
       storageService.deleteTimeRecord(id);
       setRecords(prev => prev.filter(r => r.id !== id));
       showToast('Lançamento excluído com sucesso do Cloud Firestore!', 'success');
+
+      // Audit Trail
+      registrarLogAuditoria({
+        usuarioId: currentUser?.email || currentUserEmail || 'sistema@comara.aer.mil.br',
+        usuarioNome: (currentUser as any)?.nome || (currentUser as any)?.displayName || currentUserEmail || 'Operador',
+        usuarioPerfil: userRole,
+        canteiroId: targetRec?.employeeSede || currentUser?.canteiroCodigo || 'TODOS',
+        tipoAcao: 'EXCLUSAO_REGISTRO',
+        detalhes: `Exclusão de lançamento de ${targetRec?.horasBrutas || 0}h (${targetRec?.tipoOcorrencia || 'Registro'}) da Matrícula ${targetRec?.matricula || id}.`,
+        recursoId: id,
+      });
     } catch (err: any) {
       console.error('Erro ao excluir lançamento:', err);
       storageService.deleteTimeRecord(id);
@@ -843,6 +914,28 @@ export default function App() {
       storageService.addDispensaSptf(dispensa);
       storageService.addTimeRecord(lancamentoRecord);
       showToast(`Guia de Dispensa de SPTF #${dispensa.numeroGuia} emitida e debitada no Banco de Horas com sucesso!`, 'success');
+
+      // Audit Trail
+      registrarLogAuditoria({
+        usuarioId: currentUser?.email || currentUserEmail || 'sistema@comara.aer.mil.br',
+        usuarioNome: (currentUser as any)?.nome || (currentUser as any)?.displayName || currentUserEmail || 'Operador',
+        usuarioPerfil: userRole,
+        canteiroId: dispensa.secaoCanteiro || currentUser?.canteiroCodigo || 'TODOS',
+        tipoAcao: 'EMISSAO_DISPENSA',
+        detalhes: `Dispensa emitida para o servidor Matrícula ${dispensa.matricula} (${dispensa.nome}) - ${dispensa.totalHoras.toFixed(1)}h abatidas (Guia #${dispensa.numeroGuia || 'S/N'}).`,
+        recursoId: dispensa.id,
+        detalhesJson: {
+          dispensaId: dispensa.id,
+          matricula: dispensa.matricula,
+          nome: dispensa.nome,
+          totalHoras: dispensa.totalHoras,
+          data: dispensa.data,
+          horarioInicio: dispensa.horarioInicio,
+          horarioFim: dispensa.horarioFim,
+          numeroGuia: dispensa.numeroGuia,
+          secaoCanteiro: dispensa.secaoCanteiro,
+        }
+      });
     } catch (error: any) {
       console.error('Erro ao emitir Dispensa de SPTF no Firestore:', error);
       if (isPermissionError(error)) {
@@ -861,6 +954,7 @@ export default function App() {
       showToast('Ação bloqueada: Seu nível de acesso não permite exclusão de dispensas.', 'error');
       return;
     }
+    const targetDispensa = dispensasSptf.find(d => d.id === dispensaId);
     try {
       await firestoreService.deleteDispensaSptf(dispensaId, lancamentoId);
       storageService.deleteDispensaSptf(dispensaId);
@@ -870,6 +964,17 @@ export default function App() {
       }
       setDispensasSptf(prev => prev.filter(d => d.id !== dispensaId));
       showToast('Guia de Dispensa de SPTF cancelada com sucesso!', 'success');
+
+      // Audit Trail
+      registrarLogAuditoria({
+        usuarioId: currentUser?.email || currentUserEmail || 'sistema@comara.aer.mil.br',
+        usuarioNome: (currentUser as any)?.nome || (currentUser as any)?.displayName || currentUserEmail || 'Operador',
+        usuarioPerfil: userRole,
+        canteiroId: targetDispensa?.secaoCanteiro || currentUser?.canteiroCodigo || 'TODOS',
+        tipoAcao: 'CANCELAMENTO_DISPENSA',
+        detalhes: `Cancelamento de Guia de Dispensa de SPTF #${targetDispensa?.numeroGuia || dispensaId} (Servidor: ${targetDispensa?.nome || targetDispensa?.matricula || 'N/A'}).`,
+        recursoId: dispensaId,
+      });
     } catch (err: any) {
       console.error('Erro ao excluir dispensa SPTF:', err);
       storageService.deleteDispensaSptf(dispensaId);
@@ -974,9 +1079,34 @@ export default function App() {
   };
 
   const handleSaveConstructionSite = async (site: Partial<ConstructionSite>) => {
+    const rawCode = site.code || site.codigo || 'KO';
+    const rawName = site.name || site.nome || `Canteiro ${rawCode}`;
+    const rawChief = site.chief || site.chefeCanteiro || '';
+    const rawChefeDa = site.chefeDa || '';
+    const rawAuxDa = site.auxDa || '';
     try {
       await firestoreService.saveConstructionSite(site);
       showToast('Canteiro de obras salvo com sucesso no Firestore!');
+
+      // Audit Trail: Passagem de Bastão / Troca de Cargo / Atualização de Canteiro
+      registrarLogAuditoria({
+        usuarioId: currentUser?.email || currentUserEmail || 'sistema@comara.aer.mil.br',
+        usuarioNome: (currentUser as any)?.nome || (currentUser as any)?.displayName || currentUserEmail || 'Operador',
+        usuarioPerfil: userRole,
+        canteiroId: rawCode,
+        tipoAcao: 'PASSAGEM_BASTAO',
+        detalhes: `Atualização de chefia/dados do canteiro ${rawCode} (${rawName}): Chefe: "${rawChief || 'N/A'}", Chefe DA: "${rawChefeDa || 'N/A'}", Aux DA: "${rawAuxDa || 'N/A'}".`,
+        recursoId: site.id || `canteiro-${rawCode}`,
+        detalhesJson: {
+          canteiroCodigo: rawCode,
+          nome: rawName,
+          chefeCanteiro: rawChief,
+          chefeDa: rawChefeDa,
+          auxDa: rawAuxDa,
+          status: site.status,
+          grauInsalubridade: site.insalubrityLevel || site.grauInsalubridade,
+        }
+      });
     } catch (err: any) {
       console.error('Erro ao salvar canteiro no Firestore:', err);
       // Fallback local
@@ -1003,9 +1133,21 @@ export default function App() {
   };
 
   const handleDeleteConstructionSite = async (id: string) => {
+    const targetSite = constructionSites.find(s => s.id === id);
     try {
       await firestoreService.deleteConstructionSite(id);
       showToast('Canteiro de obras removido com sucesso.');
+
+      // Audit Trail
+      registrarLogAuditoria({
+        usuarioId: currentUser?.email || currentUserEmail || 'sistema@comara.aer.mil.br',
+        usuarioNome: (currentUser as any)?.nome || (currentUser as any)?.displayName || currentUserEmail || 'Operador',
+        usuarioPerfil: userRole,
+        canteiroId: targetSite?.code || targetSite?.branch || 'TODOS',
+        tipoAcao: 'EXCLUSAO_REGISTRO',
+        detalhes: `Exclusão do canteiro de obras "${targetSite?.name || id}" (Código: ${targetSite?.code || 'N/A'}).`,
+        recursoId: id,
+      });
     } catch (err: any) {
       console.error('Erro ao remover canteiro:', err);
       setConstructionSites((prev) => prev.filter((s) => s.id !== id));
@@ -1039,6 +1181,20 @@ export default function App() {
 
       setBatchProgress(null);
       showToast(`${newPaystubs.length} contracheques importados e gravados com sucesso!`, 'success');
+
+      // Audit Trail
+      registrarLogAuditoria({
+        usuarioId: currentUser?.email || currentUserEmail || 'sistema@comara.aer.mil.br',
+        usuarioNome: (currentUser as any)?.nome || (currentUser as any)?.displayName || currentUserEmail || 'Operador',
+        usuarioPerfil: userRole,
+        canteiroId: currentUser?.canteiroCodigo || 'TODOS',
+        tipoAcao: 'IMPORTACAO_FOLHA',
+        detalhes: `Importação de folha concluída: ${newPaystubs.length.toLocaleString('pt-BR')} contracheques gravados no Firestore.`,
+        detalhesJson: {
+          totalContracheques: newPaystubs.length,
+          mesAno: newPaystubs[0]?.mesAno || newPaystubs[0]?.periodo || '',
+        }
+      });
     } catch (err: any) {
       setBatchProgress(null);
       console.error('Erro ao salvar contracheques no Firestore:', err);
@@ -1178,6 +1334,8 @@ export default function App() {
             onLogout={handleSignOut}
             currentUser={currentUser}
             onOpenSptfDispensa={handleOpenSptfDispensa}
+            onOpenNewEntry={(mat) => handleOpenNewEntry(mat)}
+            onOpenQuickBatchModal={() => setIsQuickBatchModalOpen(true)}
           />
         </ErrorBoundary>
 
@@ -1356,33 +1514,51 @@ export default function App() {
           )}
 
           {activeTab === 'canteiros' && (
-            <CanteirosManagement
-              constructionSites={constructionSites}
-              employees={employees}
-              insalubrityRecords={insalubrityRecords}
-              onSaveSite={handleSaveConstructionSite}
-              onDeleteSite={handleDeleteConstructionSite}
-              theme={theme}
-            />
+            <ProtectedRoute
+              allowedRoles={['SUPER_ADMIN', 'RH_ADMIN', 'GESTOR_RH']}
+              currentUserRole={userRole}
+              currentUser={currentUser}
+              onRedirectToDashboard={() => setActiveTab('dashboard')}
+              fallbackTitle="Gestão de Canteiros Restrita"
+              fallbackMessage="Apenas administradores de TI (SUPER_ADMIN) ou RH Sede possuem permissão para criar, editar ou desativar canteiros de obras."
+            >
+              <CanteirosManagement
+                constructionSites={constructionSites}
+                employees={employees}
+                insalubrityRecords={insalubrityRecords}
+                onSaveSite={handleSaveConstructionSite}
+                onDeleteSite={handleDeleteConstructionSite}
+                theme={theme}
+              />
+            </ProtectedRoute>
           )}
 
           {activeTab === 'insalubridade' && (
-            <InsalubrityManagement
-              employees={employees}
-              insalubrityRecords={insalubrityRecords}
-              onSaveRecord={handleSaveInsalubrityRecord}
-              onSaveBatchRecords={handleSaveInsalubrityBatch}
-              onDeleteRecord={handleDeleteInsalubrityRecord}
-              onUpdateEmployeeGrauFixa={handleUpdateEmployeeGrauFixa}
-              onUpdateEmployees={handleUpdateEmployees}
-              onNavigateToReports={() => setActiveTab('relatorios')}
-              systemConfig={systemConfig}
-              onUpdateSystemConfig={handleSaveSystemConfig}
-              constructionSites={constructionSites}
-              currentUserEmail={currentUserEmail}
-              userRole={userRole}
-              theme={theme}
-            />
+            <ProtectedRoute
+              requiredPermission={(role) => rbacService.canValidateInsalubrity(role) || role === 'AUDITOR'}
+              currentUserRole={userRole}
+              currentUser={currentUser}
+              onRedirectToDashboard={() => setActiveTab('dashboard')}
+              fallbackTitle="Módulo de Insalubridade"
+              fallbackMessage="Seu perfil não possui autorização para homologação de laudos de insalubridade."
+            >
+              <InsalubrityManagement
+                employees={employees}
+                insalubrityRecords={insalubrityRecords}
+                onSaveRecord={handleSaveInsalubrityRecord}
+                onSaveBatchRecords={handleSaveInsalubrityBatch}
+                onDeleteRecord={handleDeleteInsalubrityRecord}
+                onUpdateEmployeeGrauFixa={handleUpdateEmployeeGrauFixa}
+                onUpdateEmployees={handleUpdateEmployees}
+                onNavigateToReports={() => setActiveTab('relatorios')}
+                systemConfig={systemConfig}
+                onUpdateSystemConfig={handleSaveSystemConfig}
+                constructionSites={constructionSites}
+                currentUserEmail={currentUserEmail}
+                userRole={userRole}
+                theme={theme}
+              />
+            </ProtectedRoute>
           )}
 
           {activeTab === 'relatorios' && (
@@ -1406,6 +1582,7 @@ export default function App() {
               employees={employees}
               records={records}
               insalubrityRecords={insalubrityRecords}
+              constructionSites={constructionSites}
               selectedMatricula={selectedMatricula}
               onSelectMatricula={setSelectedMatricula}
               onBack={() => setActiveTab('dashboard')}
@@ -1428,31 +1605,60 @@ export default function App() {
           )}
 
           {activeTab === 'contracheques' && (
-            <ContrachequesManagement
-              employees={employees}
-              paystubs={paystubs}
-              onSaveBatchPaystubs={handleSaveBatchPaystubs}
-              onSaveEmployees={handleUpdateEmployees}
-              onDeletePaystub={handleDeletePaystub}
-              currentUserEmail={currentUserEmail}
-              userRole={userRole}
-              theme={theme}
-            />
+            <ProtectedRoute
+              allowedRoles={['SUPER_ADMIN', 'RH_ADMIN', 'GESTOR_RH']}
+              currentUserRole={userRole}
+              currentUser={currentUser}
+              onRedirectToDashboard={() => setActiveTab('dashboard')}
+              fallbackTitle="Gestão de Folha & Contracheques Restrita"
+              fallbackMessage="A importação da folha de pagamento e gestão de espelhos de contracheque são exclusivas da equipe central de RH (Sede) e TI."
+            >
+              <ContrachequesManagement
+                employees={employees}
+                paystubs={paystubs}
+                onSaveBatchPaystubs={handleSaveBatchPaystubs}
+                onSaveEmployees={handleUpdateEmployees}
+                onDeletePaystub={handleDeletePaystub}
+                currentUserEmail={currentUserEmail}
+                userRole={userRole}
+                theme={theme}
+              />
+            </ProtectedRoute>
           )}
 
           {activeTab === 'permissoes_admin' && (
-            userRole === 'SUPER_ADMIN' || isAdmin ? (
+            <ProtectedRoute
+              allowedRoles={['SUPER_ADMIN']}
+              requiredPermission={(role, u) => rbacService.canManageAdmins(role, u?.email)}
+              currentUserRole={userRole}
+              currentUser={currentUser}
+              onRedirectToDashboard={() => setActiveTab('dashboard')}
+              fallbackTitle="Gestão de Permissões e Acessos RH"
+              fallbackMessage="O gerenciamento de usuários administrativos, regras de 48h e níveis de acesso é de uso exclusivo do Super Administrador (TI)."
+            >
               <AdminPermissionsManagement
                 theme={theme}
                 currentUserEmail={currentUserEmail}
               />
-            ) : (
-              <AdminLockScreen
+            </ProtectedRoute>
+          )}
+
+          {activeTab === 'auditoria' && (
+            <ProtectedRoute
+              allowedRoles={['SUPER_ADMIN', 'RH_ADMIN', 'GESTOR_RH', 'AUDITOR']}
+              currentUserRole={userRole}
+              currentUser={currentUser}
+              onRedirectToDashboard={() => setActiveTab('dashboard')}
+              fallbackTitle="Trilha de Auditoria & Logs de Segurança"
+              fallbackMessage="O acesso aos registros de auditoria e logs de segurança é restrito a Administradores (Super Admin e RH Admin) para conformidade com a LGPD."
+            >
+              <AuditTrailView
+                constructionSites={constructionSites}
+                currentUserEmail={currentUserEmail}
+                userRole={userRole}
                 theme={theme}
-                onSwitchToAdmin={() => handleToggleUserMode('ADMIN')}
-                tabTitle="Acessos RH e Gestão de Permissões"
               />
-            )
+            </ProtectedRoute>
           )}
 
           {activeTab === 'arquitetura' && (

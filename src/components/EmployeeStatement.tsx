@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
-import { Employee, TimeRecord, Attachment, CompensationStatus, InsalubrityRecord } from '../types';
+import { Employee, TimeRecord, Attachment, CompensationStatus, InsalubrityRecord, ConstructionSite } from '../types';
 import { ComaraLogo } from './ComaraLogo';
+import { getSignaturesForCanteiro } from '../services/canteiroService';
 import { 
   getEmployeeTotalBalance, 
   formatHoursDecimal, 
@@ -44,6 +45,7 @@ interface EmployeeStatementProps {
   employees: Employee[];
   records: TimeRecord[];
   insalubrityRecords?: InsalubrityRecord[];
+  constructionSites?: ConstructionSite[];
   selectedMatricula: string;
   onSelectMatricula: (matricula: string) => void;
   onBack: () => void;
@@ -61,6 +63,7 @@ export const EmployeeStatement: React.FC<EmployeeStatementProps> = ({
   employees,
   records,
   insalubrityRecords = [],
+  constructionSites = [],
   selectedMatricula,
   onSelectMatricula,
   onBack,
@@ -75,6 +78,12 @@ export const EmployeeStatement: React.FC<EmployeeStatementProps> = ({
   const currentEmployee = employees.find(e => e.matricula === selectedMatricula) || employees[0];
   const [fifoFilter, setFifoFilter] = useState<FifoFilterType>('TODOS');
   const [expandedRecordId, setExpandedRecordId] = useState<string | null>(null);
+
+  // Assinaturas dinâmicas do Canteiro do Colaborador
+  const dynamicSignatures = useMemo(() => {
+    const branchCode = currentEmployee?.sede_atual || currentEmployee?.sede || 'KO';
+    return getSignaturesForCanteiro(branchCode, constructionSites);
+  }, [currentEmployee, constructionSites]);
 
   // Insalubridade records for this employee
   const employeeInsalubrities = useMemo(() => {
@@ -869,6 +878,66 @@ export const EmployeeStatement: React.FC<EmployeeStatementProps> = ({
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* ------------------------------------------------------------- */}
+        {/* BLOCO DE ASSINATURAS INSTITUCIONAIS OFICIAIS COMARA            */}
+        {/* (Servidor SPTF, Chefe do Canteiro/Seção, Chefe da DA)         */}
+        {/* ------------------------------------------------------------- */}
+        <div className={`p-6 border-t ${
+          isDark ? 'border-[#1F2229] bg-[#0D0F14]/60' : 'border-slate-200 bg-slate-50/70'
+        } print:bg-white print:border-black print:p-4 print-avoid-break`}>
+          <div className="text-[10px] font-mono uppercase font-bold text-center mb-6 text-slate-500 print:text-black">
+            AUTENTICAÇÃO & CONFORMIDADE REGULAMENTAR — COMARA / SPTF
+          </div>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 text-center text-xs">
+            {/* 1. Servidor / Colaborador */}
+            <div className="space-y-1">
+              <div className="w-48 h-0.5 bg-slate-500 print:bg-black mx-auto mb-2"></div>
+              <div className="font-bold text-slate-200 print:text-black">
+                {currentEmployee.nome}
+              </div>
+              <div className="text-[11px] font-mono text-blue-400 print:text-slate-800">
+                Matrícula: {currentEmployee.matricula}
+              </div>
+              <div className="text-[9px] text-slate-400 print:text-slate-600">
+                Servidor / Beneficiário SPTF
+              </div>
+            </div>
+
+            {/* 2. Liderança de Canteiro */}
+            <div className="space-y-1">
+              <div className="w-48 h-0.5 bg-slate-500 print:bg-black mx-auto mb-2"></div>
+              <div className="font-bold text-slate-200 print:text-black">
+                {dynamicSignatures.assinatura1.titulo}
+              </div>
+              <div className="text-[11px] font-semibold text-slate-300 print:text-slate-800">
+                {dynamicSignatures.assinatura1.nome}
+              </div>
+              <div className="text-[9px] text-slate-400 print:text-slate-600">
+                {dynamicSignatures.assinatura1.subtitulo}
+              </div>
+            </div>
+
+            {/* 3. Divisão Administrativa */}
+            <div className="space-y-1">
+              <div className="w-48 h-0.5 bg-slate-500 print:bg-black mx-auto mb-2"></div>
+              <div className="font-bold text-slate-200 print:text-black">
+                {dynamicSignatures.assinatura2.titulo}
+              </div>
+              <div className="text-[11px] font-semibold text-slate-300 print:text-slate-800">
+                {dynamicSignatures.assinatura2.nome}
+              </div>
+              <div className="text-[9px] text-slate-400 print:text-slate-600">
+                {dynamicSignatures.assinatura2.subtitulo}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-6 text-center text-[9px] font-mono text-slate-500 print:text-slate-700">
+            Documento emitido pelo Sistema Oficial de Gestão de Banco de Horas SPTF • COMARA / DECEA.
+          </div>
         </div>
       </div>
     </div>

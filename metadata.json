@@ -1,6 +1,6 @@
 {
   "name": "Sistema de Gestão de Banco de Horas SPTF",
-  "description": "Aplicação completa de Banco de Horas com regras SPTF, multiplicadores automáticos, upload de atestados para Google Drive, importação de colaboradores via CSV, painel executivo Looker Studio e arquitetura AppSheet/Google Workspace.",
+  "description": "Sistema oficial de gestão de Banco de Horas SPTF da COMARA com regras automáticas, emissão de dispensas em 2 vias, gestão de contracheques, laudos de insalubridade, trilha de auditoria e logs de segurança LGPD no Cloud Firestore.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

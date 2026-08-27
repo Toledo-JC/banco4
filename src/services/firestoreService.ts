@@ -17,7 +17,8 @@ import { db, logFirestoreError, handleFirestoreError, OperationType, isPermissio
 import { Employee, TimeRecord, AdminUser, AdminRole, InsalubrityRecord, SystemConfig, ConstructionSite, PaystubRecord, DispensaSptfRecord, AuditLog } from '../types';
 import { hashPassword } from './authService';
 import { canteiroService } from './canteiroService';
-import { auditService, RegisterAuditParams } from './auditService';
+import { auditService, RegisterAuditParams, registrarLogAuditoria } from './auditService';
+export { registrarLogAuditoria };
 
 export const COLLECTIONS = {
   COLABORADORES: 'colaboradores',
@@ -985,6 +986,10 @@ export const firestoreService = {
     return auditService.subscribeAuditLogs(onSuccess, onError, maxLimit);
   },
 
+  async registrarLogAuditoria(params: RegisterAuditParams): Promise<void> {
+    return registrarLogAuditoria(params);
+  },
+
   async logAuditEvent(params: RegisterAuditParams): Promise<void> {
     return auditService.logAction(params);
   },
@@ -1038,45 +1043,53 @@ export const firestoreService = {
 
   subscribePaystubs(
     onSuccess: (paystubs: PaystubRecord[]) => void,
-    onError?: (error: Error) => void
+    onError?: (error: Error) => void,
+    canteiroId?: string
   ): Unsubscribe {
     const path = COLLECTIONS.CONTRACHEQUES;
     try {
       return onSnapshot(
         collection(db, path),
         (snapshot) => {
-          const items: PaystubRecord[] = snapshot.docs.map((d) => {
-            const data = d.data() as any;
-            return {
-              id: d.id,
-              matricula: data.matricula || '',
-              nome: data.nome || '',
-              cargo: data.cargo || '',
-              sede: data.sede || 'KO-DL',
-              periodo: data.periodo || '',
-              mesAno: data.mesAno || '',
-              ano: Number(data.ano || 2026),
-              mes: Number(data.mes || 1),
-              dataInicio: data.dataInicio || '',
-              dataFim: data.dataFim || '',
-              cpf: data.cpf || '',
-              banco: data.banco || '',
-              agencia: data.agencia || '',
-              conta: data.conta || '',
-              rubricas: Array.isArray(data.rubricas) ? data.rubricas : [],
-              totalProventos: Number(data.totalProventos || 0),
-              totalDescontos: Number(data.totalDescontos || 0),
-              valorLiquido: Number(data.valorLiquido || 0),
-              salarioBase: data.salarioBase !== undefined ? Number(data.salarioBase) : undefined,
-              baseInss: data.baseInss !== undefined ? Number(data.baseInss) : undefined,
-              baseFgts: data.baseFgts !== undefined ? Number(data.baseFgts) : undefined,
-              fgtsMes: data.fgtsMes !== undefined ? Number(data.fgtsMes) : undefined,
-              baseIrrf: data.baseIrrf !== undefined ? Number(data.baseIrrf) : undefined,
-              importadoEm: data.importadoEm || '',
-              importadoPorEmail: data.importadoPorEmail || '',
-              observacoes: data.observacoes || ''
-            };
-          });
+          const normalizedCanteiro = (canteiroId && canteiroId !== 'TODAS' && canteiroId !== 'TODOS') ? canteiroId.toUpperCase() : null;
+          const items: PaystubRecord[] = snapshot.docs
+            .map((d) => {
+              const data = d.data() as any;
+              return {
+                id: d.id,
+                matricula: data.matricula || '',
+                nome: data.nome || '',
+                cargo: data.cargo || '',
+                sede: data.sede || 'KO-DL',
+                periodo: data.periodo || '',
+                mesAno: data.mesAno || '',
+                ano: Number(data.ano || 2026),
+                mes: Number(data.mes || 1),
+                dataInicio: data.dataInicio || '',
+                dataFim: data.dataFim || '',
+                cpf: data.cpf || '',
+                banco: data.banco || '',
+                agencia: data.agencia || '',
+                conta: data.conta || '',
+                rubricas: Array.isArray(data.rubricas) ? data.rubricas : [],
+                totalProventos: Number(data.totalProventos || 0),
+                totalDescontos: Number(data.totalDescontos || 0),
+                valorLiquido: Number(data.valorLiquido || 0),
+                salarioBase: data.salarioBase !== undefined ? Number(data.salarioBase) : undefined,
+                baseInss: data.baseInss !== undefined ? Number(data.baseInss) : undefined,
+                baseFgts: data.baseFgts !== undefined ? Number(data.baseFgts) : undefined,
+                fgtsMes: data.fgtsMes !== undefined ? Number(data.fgtsMes) : undefined,
+                baseIrrf: data.baseIrrf !== undefined ? Number(data.baseIrrf) : undefined,
+                importadoEm: data.importadoEm || '',
+                importadoPorEmail: data.importadoPorEmail || '',
+                observacoes: data.observacoes || ''
+              };
+            })
+            .filter((p) => {
+              if (!normalizedCanteiro) return true;
+              const empSede = (p.sede || '').toUpperCase();
+              return empSede.includes(normalizedCanteiro);
+            });
           onSuccess(items);
         },
         (error) => {

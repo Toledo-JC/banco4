@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { AdminUser, AdminRole } from '../types';
 import { storageService } from '../services/storageService';
 import { firestoreService } from '../services/firestoreService';
+import { registrarLogAuditoria } from '../services/auditService';
 import { hashPassword } from '../services/authService';
 import { ROLE_INFO, rbacService } from '../services/rbacService';
 import { auth } from '../services/firebase';
@@ -195,6 +196,25 @@ export const AdminPermissionsManagement: React.FC<AdminPermissionsManagementProp
         }
       });
 
+      // Trilha de Auditoria Oficial
+      registrarLogAuditoria({
+        usuarioId: currentUserEmail,
+        usuarioNome: currentUserEmail.split('@')[0] || 'Super Admin',
+        usuarioPerfil: 'SUPER_ADMIN',
+        canteiroId: adminData.canteiroCodigo || 'SEDE-MN',
+        tipoAcao: editingAdmin ? 'ALTERACAO_FUNCAO' : 'ALTERACAO_FUNCAO',
+        detalhes: editingAdmin 
+          ? `Perfil RBAC atualizado: ${adminData.nome} (${adminData.email}) alterado para perfil ${nivelAcesso} (${adminData.cargo || 'Sem cargo'}).`
+          : `Novo usuário administrativo criado: ${adminData.nome} (${adminData.email}) com perfil ${nivelAcesso}.`,
+        recursoId: adminData.email,
+        detalhesJson: {
+          email: adminData.email,
+          nome: adminData.nome,
+          nivelAcesso,
+          cargo: adminData.cargo,
+        }
+      });
+
       setFeedbackMsg(editingAdmin 
         ? `Permissões de "${adminData.nome}" atualizadas com sucesso no Firestore!` 
         : `Administrador "${adminData.nome}" cadastrado com sucesso no Cloud Firestore!`
@@ -242,6 +262,15 @@ export const AdminPermissionsManagement: React.FC<AdminPermissionsManagementProp
           usuario: currentUserEmail,
           detalhes: { email: target.email, ativo: updated.ativo }
         });
+        registrarLogAuditoria({
+          usuarioId: currentUserEmail,
+          usuarioNome: currentUserEmail.split('@')[0] || 'Super Admin',
+          usuarioPerfil: 'SUPER_ADMIN',
+          canteiroId: target.canteiroCodigo || 'SEDE-MN',
+          tipoAcao: 'ALTERACAO_FUNCAO',
+          detalhes: `Status de acesso RBAC de ${target.nome} (${target.email}) alterado para ${updated.ativo ? 'ATIVO' : 'INATIVO'}.`,
+          recursoId: target.email,
+        });
       } catch (err) {
         console.error(err);
       }
@@ -263,6 +292,15 @@ export const AdminPermissionsManagement: React.FC<AdminPermissionsManagementProp
           descricao: `Revogação de acesso de administrador para ${target?.nome || id} (${target?.email || id})`,
           usuario: currentUserEmail,
           detalhes: { email: target?.email || id }
+        });
+        registrarLogAuditoria({
+          usuarioId: currentUserEmail,
+          usuarioNome: currentUserEmail.split('@')[0] || 'Super Admin',
+          usuarioPerfil: 'SUPER_ADMIN',
+          canteiroId: target?.canteiroCodigo || 'SEDE-MN',
+          tipoAcao: 'EXCLUSAO_REGISTRO',
+          detalhes: `Revogação e exclusão definitiva de acesso administrativo de ${target?.nome || id} (${target?.email || id}).`,
+          recursoId: target?.email || id,
         });
         setFeedbackMsg('Administrador removido da base.');
         setTimeout(() => setFeedbackMsg(null), 3000);

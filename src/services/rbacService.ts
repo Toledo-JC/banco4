@@ -132,6 +132,77 @@ export const rbacService = {
     return r === 'SUPER_ADMIN' || r === 'RH_ADMIN' || r === 'GESTOR_RH';
   },
 
+  isGlobalRole(role?: AdminRole | string): boolean {
+    return this.hasGlobalAccess(role);
+  },
+
+  /**
+   * Permissão para aprovar e homologar horas
+   */
+  canApproveHours(role?: AdminRole | string): boolean {
+    if (!role) return false;
+    const r = role.toString().toUpperCase();
+    return (
+      r === 'SUPER_ADMIN' ||
+      r === 'RH_ADMIN' ||
+      r === 'GESTOR_RH' ||
+      r === 'GERENTE_CANTEIRO' ||
+      r === 'GERENTE' ||
+      r === 'GERENTE_CAMPO' ||
+      r === 'ROLE_GERENTE' ||
+      r === 'CHEFE_CANTEIRO' ||
+      r === 'ENCARREGADO_CANTEIRO' ||
+      r === 'CHEFE_DA' ||
+      r === 'ENCARREGADO_DA'
+    );
+  },
+
+  /**
+   * Permissão para visualizar logs de auditoria e segurança
+   */
+  canViewAuditLogs(role?: AdminRole | string): boolean {
+    if (!role) return false;
+    const r = role.toString().toUpperCase();
+    return r === 'SUPER_ADMIN' || r === 'RH_ADMIN' || r === 'GESTOR_RH' || r === 'AUDITOR';
+  },
+
+  /**
+   * Permissão para excluir lançamentos ou colaboradores
+   */
+  canDeleteRecords(role?: AdminRole | string): boolean {
+    if (!role) return false;
+    const r = role.toString().toUpperCase();
+    return r === 'SUPER_ADMIN' || r === 'RH_ADMIN';
+  },
+
+  /**
+   * Controle de acesso às abas principais da navegação
+   */
+  canAccessTab(tab: string, role?: AdminRole | string): boolean {
+    if (!role) return false;
+    const r = role.toString().toUpperCase();
+    switch (tab) {
+      case 'canteiros':
+        return this.canManageCanteiros(r);
+      case 'auditoria':
+        return this.canViewAuditLogs(r);
+      case 'permissoes_admin':
+        return this.canManageAdminPermissions(r);
+      case 'contracheques':
+        return this.canManagePaystubs(r);
+      case 'insalubridade':
+        return this.canValidateInsalubrity(r) || r === 'AUDITOR';
+      case 'dashboard':
+      case 'colaboradores':
+      case 'relatorios':
+      case 'extrato':
+      case 'portal_colaborador':
+      case 'arquitetura':
+      default:
+        return true;
+    }
+  },
+
   /**
    * Identifica se o perfil é restrito ao seu canteiro ativo
    */

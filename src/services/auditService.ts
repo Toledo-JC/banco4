@@ -6,6 +6,8 @@ import {
   query, 
   orderBy, 
   limit, 
+  getDocs,
+  where,
   Unsubscribe 
 } from 'firebase/firestore';
 import { db, logFirestoreError, OperationType } from './firebase';
@@ -13,63 +15,94 @@ import { AuditLog, AuditActionType } from '../types';
 
 export const AUDIT_COLLECTION = 'logs_auditoria';
 
-export interface RegisterAuditParams {
+export interface DadosLogAuditoria {
   usuarioId: string;
-  nomeUsuario: string;
-  acao: AuditActionType | string;
+  usuarioNome: string;
+  usuarioPerfil?: string;
+  canteiroId: string;
+  tipoAcao: AuditActionType | string;
   detalhes: string;
-  canteiroId?: string;
   recursoId?: string;
   detalhesJson?: Record<string, any>;
   dadosAnteriores?: Record<string, any>;
   dadosNovos?: Record<string, any>;
+  ipOrigem?: string;
+}
+
+export type RegisterAuditParams = DadosLogAuditoria & {
+  nomeUsuario?: string;
+  acao?: AuditActionType | string;
+};
+
+/**
+ * Função utilitária global para salvar registros estruturados na coleção `logs_auditoria` do Firestore.
+ * Execução assíncrona não-bloqueante para não interromper os fluxos de trabalho do operador.
+ */
+export async function registrarLogAuditoria(dadosLog: DadosLogAuditoria | RegisterAuditParams): Promise<void> {
+  try {
+    const now = new Date();
+    const auditId = `audit_${now.getTime()}_${Math.floor(1000 + Math.random() * 9000)}`;
+    
+    const usuarioNomeFinal = (dadosLog.usuarioNome || (dadosLog as any).nomeUsuario || 'Operador do Sistema').trim();
+    const tipoAcaoFinal = (dadosLog.tipoAcao || (dadosLog as any).acao || 'ACAO_SISTEMA').trim();
+    const usuarioPerfilFinal = (dadosLog.usuarioPerfil || 'OPERADOR').trim().toUpperCase();
+    const canteiroIdFinal = (dadosLog.canteiroId || 'TODOS').trim().toUpperCase();
+    const usuarioIdFinal = (dadosLog.usuarioId || 'sistema@comara.aer.mil.br').trim();
+
+    const payload: Record<string, any> = {
+      id: auditId,
+      timestamp: now.toISOString(),
+      usuarioId: usuarioIdFinal,
+      usuarioNome: usuarioNomeFinal,
+      nomeUsuario: usuarioNomeFinal, // Alias retrocompatível
+      usuarioPerfil: usuarioPerfilFinal,
+      canteiroId: canteiroIdFinal,
+      tipoAcao: tipoAcaoFinal,
+      acao: tipoAcaoFinal, // Alias retrocompatível
+      detalhes: dadosLog.detalhes || '',
+    };
+
+    if (dadosLog.recursoId) payload.recursoId = dadosLog.recursoId;
+    if (dadosLog.detalhesJson) payload.detalhesJson = dadosLog.detalhesJson;
+    if (dadosLog.dadosAnteriores) payload.dadosAnteriores = dadosLog.dadosAnteriores;
+    if (dadosLog.dadosNovos) payload.dadosNovos = dadosLog.dadosNovos;
+    if (dadosLog.ipOrigem) payload.ipOrigem = dadosLog.ipOrigem;
+
+    // Sanitizar chaves undefined
+    const sanitized: Record<string, any> = {};
+    for (const key of Object.keys(payload)) {
+      if (payload[key] !== undefined) {
+        sanitized[key] = payload[key];
+      }
+    }
+
+    await setDoc(doc(db, AUDIT_COLLECTION, auditId), sanitized);
+    console.info(`[AUDIT] Log registrado com sucesso: [${tipoAcaoFinal}] ${dadosLog.detalhes}`);
+  } catch (err) {
+    console.warn('[AUDIT] Falha não-bloqueante ao registrar log de auditoria:', err);
+  }
 }
 
 export const auditService = {
   /**
-   * Registra de forma não-bloqueante um evento de auditoria na coleção `logs_auditoria` do Firestore.
+   * Registra log de auditoria
+   */
+  registrarLogAuditoria,
+
+  /**
+   * Alias de compatibilidade
    */
   async logAction(params: RegisterAuditParams): Promise<void> {
-    try {
-      const now = new Date();
-      const auditId = `audit_${now.getTime()}_${Math.floor(1000 + Math.random() * 9000)}`;
-      
-      const payload: Record<string, any> = {
-        id: auditId,
-        usuarioId: (params.usuarioId || 'sistema@comara.aer.mil.br').trim(),
-        nomeUsuario: (params.nomeUsuario || 'Operador do Sistema').trim(),
-        acao: params.acao,
-        detalhes: params.detalhes || '',
-        canteiroId: (params.canteiroId || 'TODOS').trim().toUpperCase(),
-        timestamp: now.toISOString(),
-      };
-
-      if (params.recursoId) payload.recursoId = params.recursoId;
-      if (params.detalhesJson) payload.detalhesJson = params.detalhesJson;
-      if (params.dadosAnteriores) payload.dadosAnteriores = params.dadosAnteriores;
-      if (params.dadosNovos) payload.dadosNovos = params.dadosNovos;
-
-      // Sanitizar chaves undefined
-      const sanitized: Record<string, any> = {};
-      for (const key of Object.keys(payload)) {
-        if (payload[key] !== undefined) {
-          sanitized[key] = payload[key];
-        }
-      }
-
-      await setDoc(doc(db, AUDIT_COLLECTION, auditId), sanitized);
-    } catch (err) {
-      console.warn('Registro de auditoria falhou silenciosamente:', err);
-    }
+    return registrarLogAuditoria(params);
   },
 
   /**
-   * Assina em tempo real a trilha de auditoria dos últimos 500 registros.
+   * Assina em tempo real a trilha de auditoria dos últimos registros.
    */
   subscribeAuditLogs(
     onSuccess: (logs: AuditLog[]) => void,
     onError?: (error: Error) => void,
-    maxLimit: number = 300
+    maxLimit: number = 200
   ): Unsubscribe {
     try {
       const q = query(
@@ -85,11 +118,16 @@ export const auditService = {
             const list: AuditLog[] = [];
             snapshot.forEach((docSnap) => {
               const data = docSnap.data();
+              const userNome = data.usuarioNome || data.nomeUsuario || 'Operador';
+              const act = data.tipoAcao || data.acao || 'ACAO_SISTEMA';
               list.push({
                 id: docSnap.id,
                 usuarioId: data.usuarioId || '',
-                nomeUsuario: data.nomeUsuario || '',
-                acao: data.acao || 'ACAO_SISTEMA',
+                usuarioNome: userNome,
+                nomeUsuario: userNome,
+                usuarioPerfil: data.usuarioPerfil || 'OPERADOR',
+                tipoAcao: act,
+                acao: act,
                 detalhes: data.detalhes || '',
                 detalhesJson: data.detalhesJson,
                 canteiroId: data.canteiroId || 'TODOS',
@@ -115,6 +153,58 @@ export const auditService = {
       logFirestoreError(error, OperationType.LIST, AUDIT_COLLECTION);
       if (onError) onError(error);
       return () => {};
+    }
+  },
+
+  /**
+   * Busca paginada ou filtrada sob demanda
+   */
+  async getAuditLogs(filter?: { canteiroId?: string; tipoAcao?: string; maxLimit?: number }): Promise<AuditLog[]> {
+    try {
+      const max = filter?.maxLimit || 150;
+      const q = query(
+        collection(db, AUDIT_COLLECTION),
+        orderBy('timestamp', 'desc'),
+        limit(max)
+      );
+
+      const snapshot = await getDocs(q);
+      const list: AuditLog[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        const userNome = data.usuarioNome || data.nomeUsuario || 'Operador';
+        const act = data.tipoAcao || data.acao || 'ACAO_SISTEMA';
+        list.push({
+          id: docSnap.id,
+          usuarioId: data.usuarioId || '',
+          usuarioNome: userNome,
+          nomeUsuario: userNome,
+          usuarioPerfil: data.usuarioPerfil || 'OPERADOR',
+          tipoAcao: act,
+          acao: act,
+          detalhes: data.detalhes || '',
+          detalhesJson: data.detalhesJson,
+          canteiroId: data.canteiroId || 'TODOS',
+          timestamp: data.timestamp || new Date().toISOString(),
+          ipOrigem: data.ipOrigem,
+          recursoId: data.recursoId,
+          dadosAnteriores: data.dadosAnteriores,
+          dadosNovos: data.dadosNovos,
+        });
+      });
+
+      return list.filter((log) => {
+        if (filter?.canteiroId && filter.canteiroId !== 'TODOS' && log.canteiroId !== filter.canteiroId && log.canteiroId !== 'TODOS') {
+          return false;
+        }
+        if (filter?.tipoAcao && filter.tipoAcao !== 'TODOS' && log.tipoAcao !== filter.tipoAcao) {
+          return false;
+        }
+        return true;
+      });
+    } catch (error: any) {
+      logFirestoreError(error, OperationType.LIST, AUDIT_COLLECTION);
+      return [];
     }
   }
 };

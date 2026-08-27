@@ -400,8 +400,15 @@ export interface DispensaSptfRecord {
 }
 
 export type AuditActionType =
-  | 'CRIACAO_LANCAMENTO'
+  | 'LANCAMENTO_HORAS'
   | 'EDICAO_LANCAMENTO'
+  | 'EXCLUSAO_REGISTRO'
+  | 'EMISSAO_DISPENSA'
+  | 'CANCELAMENTO_DISPENSA'
+  | 'ALTERACAO_FUNCAO'
+  | 'PASSAGEM_BASTAO'
+  | 'IMPORTACAO_FOLHA'
+  | 'CRIACAO_LANCAMENTO'
   | 'EXCLUSAO_LANCAMENTO'
   | 'IMPORTACAO_LANCAMENTOS_LOTE'
   | 'DESIGNACAO_CHEFE_CANTEIRO'
@@ -424,12 +431,15 @@ export type AuditActionType =
 export interface AuditLog {
   id: string; // Document ID: `audit_${Date.now()}_${random}`
   usuarioId: string; // ID/Email do usuário que executou a ação
-  nomeUsuario: string; // Nome do usuário
-  acao: AuditActionType | string;
+  usuarioNome: string; // Nome do usuário conectado
+  nomeUsuario?: string; // Alias retrocompatível
+  usuarioPerfil?: string; // Perfil ativo (ex: CHEFE_DA, AUX_DA, RH_ADMIN, SUPER_ADMIN)
+  tipoAcao: AuditActionType | string; // Categoria da ação
+  acao?: string; // Alias retrocompatível
   detalhes: string; // Descrição textual detalhada da alteração
   detalhesJson?: Record<string, any>; // Metadados adicionais em JSON
-  canteiroId: string; // Sede ou canteiro afetado (ex: 'KO', 'KO-DL', 'BE', 'MN', 'TODOS')
-  timestamp: string; // Data ISO String
+  canteiroId: string; // Sede ou canteiro afetado (ex: 'DECO-KO', 'KO', 'KO-DL', 'BE', 'MN', 'TODOS')
+  timestamp: string; // Data ISO String ou formatada
   ipOrigem?: string;
   recursoId?: string;
   dadosAnteriores?: Record<string, any>;

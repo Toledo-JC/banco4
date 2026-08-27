@@ -119,8 +119,9 @@ const DispensaLogo: React.FC<{ logoUrl?: string }> = ({ logoUrl }) => {
       <img 
         src={effectiveSrc} 
         alt="Logo COMARA" 
-        className="h-14 sm:h-16 w-auto max-h-16 object-contain"
+        crossOrigin="anonymous"
         referrerPolicy="no-referrer"
+        className="h-[52px] sm:h-[58px] w-auto max-h-[58px] max-w-[80px] object-contain shrink-0"
         onError={() => setImgError(true)}
       />
     );
@@ -128,13 +129,13 @@ const DispensaLogo: React.FC<{ logoUrl?: string }> = ({ logoUrl }) => {
 
   // Brasão e Gládio Alado Vetorial Oficial COMARA de Alta Resolução
   return (
-    <div className="h-14 sm:h-16 w-auto flex items-center justify-center">
-      <svg viewBox="0 0 100 120" className="h-full w-auto max-h-16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <div className="h-[52px] sm:h-[58px] w-auto flex items-center justify-center shrink-0">
+      <svg viewBox="0 0 100 120" className="h-full w-auto max-h-[58px]" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M 6 6 L 94 6 L 94 65 C 94 95 74 114 50 114 C 26 114 6 95 6 65 Z" fill="#0B2545" stroke="#134074" strokeWidth="3" />
         <path d="M 9 9 L 91 9 L 91 65 C 91 92 72 111 50 111 C 28 111 9 92 9 65 Z" fill="#134074" />
         {/* Banner Superior COMARA */}
         <rect x="12" y="14" width="76" height="18" rx="3" fill="#1E40AF" stroke="#60A5FA" strokeWidth="1" />
-        <text x="50" y="27" fill="#FFFFFF" fontSize="10" fontWeight="900" textAnchor="middle" fontFamily="sans-serif">COMARA</text>
+        <text x="50" y="27" fill="#FFFFFF" fontSize="10" fontWeight="900" textAnchor="middle" fontFamily="Arial, sans-serif">COMARA</text>
         {/* Espada / Gládio */}
         <path d="M 49 38 L 51 38 L 51 96 L 49 96 Z" fill="#F59E0B" />
         <path d="M 43 49 L 57 49 L 57 53 L 43 53 Z" fill="#F59E0B" />
@@ -359,7 +360,7 @@ export function generateSptfPrintHtml(
   `;
 
   const logoCellHtml = (logoUrl && logoUrl.trim().length > 0)
-    ? `<img src="${logoUrl}" alt="Logo COMARA" style="height:55px; width:auto; max-height:55px; object-fit:contain;" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';" /><div style="display:none;">${svgLogoHtml}</div>`
+    ? `<img src="${logoUrl}" alt="Logo COMARA" crossorigin="anonymous" referrerpolicy="no-referrer" style="height:55px; width:auto; max-height:58px; max-width:80px; object-fit:contain; display:inline-block; vertical-align:middle;" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';" /><div style="display:none;">${svgLogoHtml}</div>`
     : svgLogoHtml;
 
   const renderViaHtml = () => `

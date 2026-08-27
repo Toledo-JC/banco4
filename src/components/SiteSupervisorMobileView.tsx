@@ -23,7 +23,8 @@ import {
   ChevronDown,
   ChevronUp,
   Info,
-  FileText
+  FileText,
+  Plus
 } from 'lucide-react';
 
 interface SiteSupervisorMobileViewProps {
@@ -34,6 +35,8 @@ interface SiteSupervisorMobileViewProps {
   onLogout?: () => void;
   currentUser?: any;
   onOpenSptfDispensa?: (matricula?: string) => void;
+  onOpenNewEntry?: (matricula?: string) => void;
+  onOpenQuickBatchModal?: () => void;
 }
 
 type SortOption = 'DEVEDORES' | 'CREDORES' | 'ALFABETICA';
@@ -46,6 +49,8 @@ export const SiteSupervisorMobileView: React.FC<SiteSupervisorMobileViewProps> =
   onLogout,
   currentUser,
   onOpenSptfDispensa,
+  onOpenNewEntry,
+  onOpenQuickBatchModal,
 }) => {
   const isDark = theme === 'dark';
 
@@ -184,6 +189,18 @@ export const SiteSupervisorMobileView: React.FC<SiteSupervisorMobileViewProps> =
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {onOpenQuickBatchModal && (
+              <button
+                onClick={() => onOpenQuickBatchModal()}
+                title="Lançamento Rápido de Horas em Lote"
+                className="px-2.5 py-1.5 rounded-xl border border-blue-500/40 bg-blue-500/15 text-blue-300 hover:bg-blue-500/25 transition-all text-xs font-bold flex items-center gap-1 cursor-pointer shadow-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Lançar Horas</span>
+                <span className="sm:hidden">+Horas</span>
+              </button>
+            )}
+
             {onOpenSptfDispensa && (
               <button
                 onClick={() => onOpenSptfDispensa()}
@@ -601,7 +618,24 @@ export const SiteSupervisorMobileView: React.FC<SiteSupervisorMobileViewProps> =
                         </div>
                       )}
                       {/* Ações Rápidas do Colaborador no Canteiro */}
-                      <div className="pt-2 border-t flex items-center justify-between gap-2 flex-wrap">
+                      <div className="pt-2 border-t grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {onOpenNewEntry && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenNewEntry(emp.matricula);
+                            }}
+                            className={`py-2 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-2 border transition-all cursor-pointer ${
+                              isDark
+                                ? 'bg-blue-500/15 border-blue-500/30 text-blue-300 hover:bg-blue-500/25'
+                                : 'bg-blue-50 border-blue-300 text-blue-800 hover:bg-blue-100 shadow-xs'
+                            }`}
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Lançar Horas / Ocorrência</span>
+                          </button>
+                        )}
                         {onOpenSptfDispensa && (
                           <button
                             type="button"
@@ -609,14 +643,14 @@ export const SiteSupervisorMobileView: React.FC<SiteSupervisorMobileViewProps> =
                               e.stopPropagation();
                               onOpenSptfDispensa(emp.matricula);
                             }}
-                            className={`w-full py-2 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-2 border transition-all cursor-pointer ${
+                            className={`py-2 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-2 border transition-all cursor-pointer ${
                               isDark
                                 ? 'bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/25'
                                 : 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100 shadow-xs'
                             }`}
                           >
                             <FileText className="w-3.5 h-3.5" />
-                            <span>Emitir Dispensa de SPTF (2 Vias A4)</span>
+                            <span>Emitir Dispensa (2 Vias)</span>
                           </button>
                         )}
                       </div>
